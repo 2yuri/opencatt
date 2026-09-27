@@ -1,0 +1,7 @@
+# LF everywhere, on every OS: Prettier checks for it, and Windows CI checks out CRLF otherwise
+# (OP-85, the first Windows run). Binary files are detected and left alone.
+* text=auto eol=lf
+*.png binary
+*.ico binary
+*.icns binary
+*.gz binary

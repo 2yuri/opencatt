@@ -1,0 +1,89 @@
+name: Release
+
+# Push a tag like v0.1.0 to build installers on every OS and attach them to a draft release.
+# The tag must match package.json's version. Publishing the draft is what makes it an update:
+# the apps only see published releases (src/main/updates.ts).
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            dist: dist:mac
+            encoder: h264_videotoolbox -allow_sw 1
+            smoke: release/mac-arm64/OpenCatt.app/Contents/Resources/ffmpeg/ffmpeg
+          - os: windows-latest
+            dist: dist:win
+            encoder: h264_mf
+            smoke: release/win-unpacked/resources/ffmpeg/ffmpeg.exe
+          - os: ubuntu-latest
+            dist: dist:linux
+            encoder: libopenh264
+            smoke: release/linux-unpacked/resources/ffmpeg/ffmpeg
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v5
+      - name: The tag matches package.json's version
+        shell: bash
+        run: |
+          version=$(node -p "require('./package.json').version")
+          test "${GITHUB_REF_NAME}" = "v${version}" || { echo "Tag ${GITHUB_REF_NAME} != v${version}"; exit 1; }
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm test
+      # dist:* fetches the LGPL ffmpeg + ffprobe it ships (OP-62); the repo may be private.
+      - run: pnpm ${{ matrix.dist }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: The packaged ffmpeg encodes H.264
+        shell: bash
+        run: |
+          ff="${{ matrix.smoke }}"
+          "$ff" -hide_banner -version | head -1
+          "$ff" -hide_banner -encoders | grep -E 'h264'
+          "$ff" -v error -f lavfi -i testsrc2=size=640x360:rate=30 -t 1 \
+            -c:v ${{ matrix.encoder }} -pix_fmt yuv420p smoke.mp4
+          "${ff%ffmpeg*}ffprobe${ff##*ffmpeg}" -v error -show_entries stream=codec_name,profile -of csv smoke.mp4
+      - uses: actions/upload-artifact@v4
+        with:
+          name: installers-${{ matrix.os }}
+          if-no-files-found: error
+          # latest*.yml and the blockmaps are what electron-updater reads (OP-14).
+          path: |
+            release/*.dmg
+            release/*.zip
+            release/*.exe
+            release/*.AppImage
+            release/*.deb
+            release/*.blockmap
+            release/latest*.yml
+
+  release:
+    name: Draft release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: installers
+          merge-multiple: true
+      - uses: softprops/action-gh-release@v2
+        with:
+          draft: true
+          generate_release_notes: true
+          files: installers/*

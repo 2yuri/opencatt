@@ -1,0 +1,34 @@
+/*
+ * Tailwind v4 (boss, #general 614). Screens move to utilities one by one in epic 8, built from
+ * Pencil's html-tailwind export. No Preflight until every screen has moved: styles.css still
+ * leans on the browser defaults. Utilities are imported unlayered so they win over
+ * styles.css's element rules (button, a) by specificity rather than losing by layer order.
+ */
+@import 'tailwindcss/theme.css' layer(theme);
+@import 'tailwindcss/utilities.css';
+
+/* The design system v2 tokens from styles.css :root, as Tailwind colours and fonts. */
+@theme inline {
+  --color-ds-bg: var(--ds-bg);
+  --color-ds-surface: var(--ds-surface);
+  --color-ds-raised: var(--ds-raised);
+  --color-ds-inset: var(--ds-inset);
+  --color-ds-border: var(--ds-border);
+  --color-ds-border-strong: var(--ds-border-strong);
+  --color-ds-text: var(--ds-text);
+  --color-ds-text-2: var(--ds-text-2);
+  --color-ds-text-3: var(--ds-text-3);
+  --color-ds-accent: var(--ds-accent);
+  --color-ds-accent-2: var(--ds-accent-2);
+  --color-ds-accent-text: var(--ds-accent-text);
+  --color-ds-green: var(--ds-green);
+  --color-ds-green-2: var(--ds-green-2);
+  --color-ds-amber: var(--ds-amber);
+  --color-ds-amber-2: var(--ds-amber-2);
+  --color-ds-red: var(--ds-red);
+  --color-ds-red-2: var(--ds-red-2);
+  --color-ds-blue: var(--ds-blue);
+  --color-ds-blue-2: var(--ds-blue-2);
+  --font-sans: 'Geist Variable', system-ui, sans-serif;
+  --font-mono: 'Geist Mono Variable', ui-monospace, monospace;
+}

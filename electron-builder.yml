@@ -1,0 +1,141 @@
+# Installers for Windows, macOS and Linux. Run `pnpm dist` (current OS) or `pnpm dist:<os>`.
+# No certificates yet (OP-14): macOS builds are ad-hoc signed and Windows builds unsigned, so
+# Gatekeeper and SmartScreen warn on first launch; README "Installing" has the steps.
+appId: io.github.opencat.app
+productName: OpenCatt
+copyright: Copyright © 2026 OpenCatt contributors
+artifactName: ${productName}-${version}-${os}-${arch}.${ext}
+
+directories:
+  output: release
+  buildResources: build
+
+# Vite bundles the renderer (React included) and main has no runtime dependencies,
+# so only the compiled output goes into the app.
+files:
+  - out/**/*
+  - package.json
+asarUnpack: []
+
+# Icons the running app loads itself (window icon on Windows and Linux, tray on all three).
+# build/ isn't packed, so they ship next to app.asar in resources/icons (src/main/appIcons.ts).
+extraResources:
+  - from: build/icons
+    to: icons
+    filter: ['*.png']
+  - from: build
+    to: icons
+    filter: ['tray.png', 'tray@2x.png', 'tray.ico', 'trayTemplate.png', 'trayTemplate@2x.png']
+
+mac:
+  category: public.app-category.social-networking
+  target:
+    - target: dmg
+      arch: [arm64, x64]
+    - target: zip
+      arch: [arm64, x64]
+  # Ad-hoc signed: Apple Silicon refuses to run an app whose signature packaging broke ("is
+  # damaged"). Swap '-' for a Developer ID and turn hardenedRuntime on (and notarize) once we
+  # have a certificate.
+  identity: '-'
+  hardenedRuntime: false
+  icon: build/icon.icns
+  # LGPL ffmpeg + ffprobe for this arch (OP-62), outside the asar so they can run.
+  extraResources:
+    - from: vendor/ffmpeg/darwin-${arch}
+      to: ffmpeg
+    - from: build/third-party
+      to: third-party
+
+dmg:
+  artifactName: ${productName}-${version}-mac-${arch}.${ext}
+  title: ${productName}
+  icon: build/icon.icns
+  background: build/dmg-background.png
+  window:
+    width: 660
+    height: 400
+  # Drop positions from build/ICONS.md.
+  contents:
+    - x: 180
+      y: 210
+      type: file
+    - x: 480
+      y: 210
+      type: link
+      path: /Applications
+
+win:
+  icon: build/icon.ico
+  extraResources:
+    - from: vendor/ffmpeg/win32-x64
+      to: ffmpeg
+    - from: build/third-party
+      to: third-party
+  target:
+    - target: nsis
+      arch: [x64]
+
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  installerIcon: build/icon.ico
+  uninstallerIcon: build/icon.ico
+  installerHeaderIcon: build/icon.ico
+  shortcutName: OpenCatt
+  uninstallDisplayName: OpenCatt
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  artifactName: ${productName}-${version}-win-setup-${arch}.${ext}
+
+linux:
+  category: Network
+  maintainer: OpenCatt contributors <opencat@users.noreply.github.com>
+  synopsis: Schedule posts on X with an agent to help you write them
+  icon: build/icons
+  extraResources:
+    - from: vendor/ffmpeg/linux-x64
+      to: ffmpeg
+    - from: build/third-party
+      to: third-party
+  desktop:
+    entry:
+      Name: OpenCatt
+      # Must equal the window's WM_CLASS for the dock to group the window under its launcher.
+      # Chromium lowercases the product name: xprop reports "opencatt" (scripts/check-linux.sh).
+      StartupWMClass: opencatt
+      Comment: Schedule posts on X with an agent to help you write them
+  target:
+    - target: AppImage
+      arch: [x64]
+    - target: deb
+      arch: [x64]
+
+deb:
+  # electron-builder's default list plus the libraries Electron loads at start that it leaves out:
+  # without libasound2 the app fails on a minimal Debian with "libasound.so.2: cannot open shared
+  # object file" (found by scripts/check-linux.sh). t64 names are for Debian 13 and Ubuntu 24.04.
+  depends:
+    - libgtk-3-0 | libgtk-3-0t64
+    - libnotify4
+    - libnss3
+    - libxss1
+    - libxtst6
+    - xdg-utils
+    - libatspi2.0-0 | libatspi2.0-0t64
+    - libuuid1
+    - libsecret-1-0
+    - libasound2 | libasound2t64
+    - libgbm1
+
+# Publishing is inferred from package.json's "repository" (github:owner/repo): electron-builder
+# writes latest*.yml and app-update.yml for the updater from it (src/main/updates.ts). The
+# upload itself is release.yml's job, so every dist script passes --publish never.
+
+# Fuses are set explicitly so nobody hardens them by accident. runAsNode must stay on: the MCP
+# bridge (src/main/mcp/manager.ts) and the claude CLI launcher on Windows
+# (src/main/agent/cli/find.ts) run OpenCatt's own executable as Node with ELECTRON_RUN_AS_NODE=1.
+# Turning it off needs another launcher for both first (updates.test.ts pins it).
+electronFuses:
+  runAsNode: true

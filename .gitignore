@@ -1,0 +1,10 @@
+node_modules/
+out/
+dist/
+*.log
+.DS_Store
+.claude/
+release/
+release-linux/
+release-windows/
+vendor/

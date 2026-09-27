@@ -1,0 +1,416 @@
+:root {
+  /* Design v2 (OpenCat.pen "OpenCatt design system v2"). Dark only, by the boss's call. */
+  color-scheme: dark;
+  font-family: 'Geist Variable', system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  background: var(--ds-bg);
+  color: var(--ds-text);
+
+  --ds-bg: #09090b;
+  --ds-surface: #111114;
+  --ds-raised: #18181c;
+  --ds-inset: #0e0e11;
+  --ds-border: #232329;
+  --ds-border-strong: #2e2e36;
+  --ds-text: #fafafa;
+  --ds-text-2: #a1a1aa;
+  --ds-text-3: #6b6b76;
+  --ds-accent: #7c6cff;
+  --ds-accent-2: #1e1a3d;
+  --ds-accent-text: #b3a9ff;
+  --ds-green: #34d399;
+  --ds-green-2: #0f2a1f;
+  --ds-amber: #fbbf24;
+  --ds-amber-2: #2b2109;
+  --ds-red: #f87171;
+  --ds-red-2: #2d1414;
+  --ds-blue: #60a5fa;
+  --ds-blue-2: #101e36;
+  --ds-mono: 'Geist Mono Variable', ui-monospace, monospace;
+
+  /* The v1 names, kept until every screen moves to the ds-* tokens (epic 8). */
+  --canvas: var(--ds-surface);
+  --line: var(--ds-border);
+  --muted: var(--ds-text-2);
+  --hover: var(--ds-raised);
+  --accent: var(--ds-accent);
+  --posted: var(--ds-green);
+  --failed: var(--ds-red);
+  --warn: var(--ds-amber);
+  --pending: var(--ds-amber);
+}
+
+body {
+  margin: 0;
+  /* Text size lives here, not on :root, so 1rem stays 16px: Tailwind's spacing, radius and text
+     scales are rem-based and match the Pencil values only at 16px (OP-57). */
+  font-size: 13px;
+}
+
+button {
+  font: inherit;
+  color: inherit;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.status {
+  opacity: 0.7;
+  font-size: 11.7px;
+}
+
+.error {
+  color: var(--failed);
+}
+
+/* Day board */
+
+.board {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  box-sizing: border-box;
+  padding: 16px 24px 24px;
+}
+
+.column {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  overflow-y: auto;
+  border-radius: 10px;
+  background: var(--hover);
+}
+
+.column h2 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 4px;
+  font-size: 12.35px;
+}
+
+.card {
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--accent);
+  border-radius: 8px;
+  background: var(--canvas);
+}
+
+.spinner {
+  width: 10px;
+  height: 10px;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .spinner {
+    animation: none;
+  }
+}
+
+/* Buttons shared by the editor and cards */
+
+.primary {
+  padding: 5px 12px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: transparent;
+  cursor: pointer;
+}
+
+button.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: white;
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.editor {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: min(560px, 100%);
+  box-sizing: border-box;
+  padding: 20px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--canvas);
+  box-shadow: 0 12px 40px color-mix(in srgb, black 35%, transparent);
+}
+
+.editor:focus {
+  outline: none;
+}
+
+.editor h2 {
+  margin: 0;
+  font-size: 14.3px;
+}
+
+.editor textarea {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  resize: vertical;
+}
+
+.editor textarea:focus,
+.editor input:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
+}
+
+.editor-counter-over {
+  color: var(--failed);
+  font-weight: 600;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+.shell {
+  display: flex;
+  height: 100vh;
+  background: var(--ds-bg);
+}
+
+/* The screens sit in one rounded card between the sidebar and the agent (design v2). */
+.main {
+  flex: 1;
+  min-width: 0;
+  margin: 10px 0 10px 0;
+  overflow: auto;
+  border: 1px solid var(--ds-border);
+  border-radius: 14px;
+  background: var(--ds-surface);
+}
+
+/* Sidebar (design v2) */
+
+.sidebar {
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+  gap: 2px;
+  /* Width from shell/layout.ts: 232px, or the 64px icon rail on a narrow window (OP-58). */
+  padding: 14px 12px;
+  box-sizing: border-box;
+  -webkit-app-region: drag;
+}
+
+[data-platform='mac'] .sidebar {
+  padding-top: 44px;
+}
+
+.sidebar > * {
+  -webkit-app-region: no-drag;
+}
+
+.sidebar-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 8px 16px;
+}
+
+.sidebar-logo {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 7px;
+  background: linear-gradient(135deg, #8b7cff, #5b45f0);
+  color: #fff;
+}
+
+.sidebar-name {
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: -0.2px;
+}
+
+.nav-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sidebar.rail .sidebar-brand {
+  justify-content: center;
+  padding: 0 0 16px;
+}
+
+.sidebar.rail .sidebar-account {
+  justify-content: center;
+  padding: 10px 0;
+}
+
+.nav-badge {
+  display: inline-flex;
+  align-items: center;
+  height: 18px;
+  padding: 0 6px;
+  border-radius: 9px;
+  background: var(--ds-amber-2);
+  color: var(--ds-amber);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.sidebar-spacer {
+  flex: 1;
+}
+
+.sidebar-account {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 6px;
+  padding: 10px 8px;
+  border-top: 1px solid var(--ds-border);
+}
+
+.sidebar-avatar {
+  display: grid;
+  flex-shrink: 0;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 13px;
+  background: linear-gradient(135deg, #60a5fa, #2563eb);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.sidebar-account-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.sidebar-account-text > * {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sidebar-account-name {
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.sidebar-account-state {
+  color: var(--ds-text-3);
+  font-size: 11px;
+}
+
+/* Chat panel */
+
+.chat-panel {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+  margin: 10px;
+  overflow: hidden;
+  border: 1px solid var(--ds-border);
+  border-radius: 14px;
+  background: var(--ds-surface);
+}
+
+.chat-panel.collapsed {
+  align-items: center;
+  gap: 8px;
+  padding: 12px 0 10px;
+  box-sizing: border-box;
+}
+
+.chat-resize {
+  position: absolute;
+  inset: 0 auto 0 -3px;
+  width: 6px;
+  cursor: col-resize;
+}
+
+/* Threads and media (OP-20) */
+
+.editor {
+  max-height: calc(100vh - 32px);
+}
+
+.part {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.part + .part {
+  padding-top: 10px;
+  border-top: 1px dashed var(--line);
+}
+
+.card-thumb {
+  position: relative;
+  flex: none;
+  width: 56px;
+  height: 56px;
+  margin-top: 6px;
+}
+
+.card-thumb img,
+.card-thumb video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: 6px;
+}
+
+/* Design v2 components (OpenCat.pen "Section Components"; values from the html-css export) */
+
+.icon-btn {
+  display: inline-grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 1px solid var(--ds-border-strong);
+  border-radius: 8px;
+  background: var(--ds-raised);
+  color: var(--ds-text-2);
+  cursor: pointer;
+}

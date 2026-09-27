@@ -1,0 +1,9 @@
+# Packages allowed to run install scripts. Electron downloads its binary;
+# native modules added later (e.g. better-sqlite3) go here too.
+allowBuilds:
+  electron: true
+  # Squirrel.Windows helper pulled in by electron-builder; we build NSIS, so it never runs.
+  electron-winstaller: false
+  esbuild: true
+  # twitter-text pulls core-js 2, whose postinstall only prints a banner.
+  core-js: false

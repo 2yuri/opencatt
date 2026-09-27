@@ -1,0 +1,9 @@
+out
+dist
+node_modules
+pnpm-lock.yaml
+LICENSE
+release
+build
+# Vendored as published (OP-81).
+src/main/agent/render/hyperframes/runtime.iife.js
