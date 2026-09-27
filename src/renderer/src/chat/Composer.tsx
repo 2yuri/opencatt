@@ -16,6 +16,10 @@ interface Props {
   recording?: boolean
   /** Nothing can answer yet: the setup card above says what to do. */
   disabled?: boolean
+  /** Typing is fine but sending waits, because another chat is answering (OP-95). */
+  blocked?: boolean
+  /** One line above the box, such as why sending is waiting on another chat (OP-95). */
+  notice?: React.ReactNode
   attachments: Attachments
   onSend: (text: string, mediaIds: string[], mode: ComposerMode, videoSeconds: number) => void
   onStop: () => void
@@ -29,6 +33,8 @@ export function Composer({
   running,
   recording = false,
   disabled = false,
+  notice = null,
+  blocked = false,
   attachments,
   onSend,
   onStop
@@ -54,7 +60,11 @@ export function Composer({
   // The spinner tile holds the place until a video's progress row takes over.
   const spinner = attachments.busy && !attachments.progress
   const canSend =
-    !running && !disabled && !attachments.busy && (text.trim().length > 0 || files.length > 0)
+    !running &&
+    !disabled &&
+    !blocked &&
+    !attachments.busy &&
+    (text.trim().length > 0 || files.length > 0)
 
   const send = (): void => {
     if (!canSend) return
@@ -72,6 +82,11 @@ export function Composer({
         send()
       }}
     >
+      {notice && (
+        <p className="m-0 text-[12px] leading-[1.45] text-ds-text-3" role="status">
+          {notice}
+        </p>
+      )}
       {recording ? (
         <RecordingRow />
       ) : (

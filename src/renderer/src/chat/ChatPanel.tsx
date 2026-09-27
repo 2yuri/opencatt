@@ -1,12 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   AudioLines,
+  ChevronDown,
   Film,
   ImagePlus,
   PanelRightClose,
   PanelRightOpen,
   Settings2,
   Sparkles,
+  SquarePen,
   Trash2
 } from 'lucide-react'
 import type { AgentStatus, ChatMessage, Post } from '@shared/api'
@@ -22,6 +24,10 @@ import { usePanelLayout } from './usePanelLayout'
 import { usePending } from '../calendar/usePending'
 import { parseToolResult } from '@shared/toolResult'
 import { messageOf, useAgentChat, type ChatError } from './useAgentChat'
+import { useChatSessions } from './useChatSessions'
+import { useActiveAccount } from '../shell/useActiveAccount'
+import { SessionMenu } from './SessionMenu'
+import { newChatShortcut } from '../shortcuts'
 import { Button, buttonClass } from '../ui'
 import { S } from './settingsStyles'
 import { useAttachments } from './useAttachments'
@@ -50,11 +56,19 @@ export function ChatPanel({
   const { open, setOpen: setLayoutOpen } = layout
   // Kept here, not in the conversation, so the Settings screen can ask for it (OP-65).
   const [showSettings, setShowSettings] = useState(false)
+  // The rail's New chat button opens the panel on the new chat, cursor in the message box (OP-95).
+  const [focusComposer, setFocusComposer] = useState(false)
+  // Why the rail's New chat couldn't make one; shown over the message box once the panel opens.
+  const [railError, setRailError] = useState<string | null>(null)
   // Closing puts the panel back on the chat for next time.
   const setOpen = useCallback(
     (next: boolean) => {
       setLayoutOpen(next)
-      if (!next) setShowSettings(false)
+      if (!next) {
+        setShowSettings(false)
+        setFocusComposer(false)
+        setRailError(null)
+      }
     },
     [setLayoutOpen]
   )
@@ -115,6 +129,25 @@ export function ChatPanel({
             </span>
           )}
         </button>
+        <button
+          type="button"
+          className="grid size-8 cursor-pointer place-items-center rounded-lg border-0 bg-transparent text-ds-text-3 hover:text-ds-text"
+          onClick={() => {
+            // Made before opening, so the panel opens straight on it.
+            void window.opencat.chat.sessions
+              .create()
+              .then(() => setRailError(null))
+              .catch((err: unknown) => setRailError(messageOf(err)))
+              .finally(() => {
+                setFocusComposer(true)
+                setOpen(true)
+              })
+          }}
+          aria-label="New chat"
+          title={`New chat (${newChatShortcut()})`}
+        >
+          <SquarePen size={16} aria-hidden="true" />
+        </button>
         <span className="flex-1" />
         <button
           type="button"
@@ -148,6 +181,8 @@ export function ChatPanel({
         onOpenVoice={onOpenVoice}
         showSettings={showSettings}
         setShowSettings={setShowSettings}
+        focusComposer={focusComposer}
+        notice={railError}
       />
     </aside>
   )
@@ -159,7 +194,9 @@ function Conversation({
   onOpenIntegrations,
   onOpenVoice,
   showSettings,
-  setShowSettings
+  setShowSettings,
+  focusComposer,
+  notice = null
 }: {
   onClose: () => void
   onOpenPost?: (post: Post) => void
@@ -167,8 +204,68 @@ function Conversation({
   onOpenVoice?: () => void
   showSettings: boolean
   setShowSettings: React.Dispatch<React.SetStateAction<boolean>>
+  /** Put the cursor in the message box on opening, after the collapsed rail's New chat. */
+  focusComposer: boolean
+  /** Something that went wrong before the panel opened, such as the rail's New chat failing. */
+  notice?: string | null
 }): React.JSX.Element {
-  const chat = useAgentChat()
+  // The account's chats (OP-95); the conversation shows the open one's events only.
+  const sessions = useChatSessions()
+  const chat = useAgentChat(sessions.current?.id, sessions.current?.streaming)
+  // Main runs one turn at a time for the whole app, so while another chat is answering, this one
+  // can't send yet (OP-95 review).
+  const answeringElsewhere =
+    sessions.list.find((s) => s.streaming && s.id !== sessions.current?.id) ?? null
+  // The same lock across accounts: a turn for another account shows up only in the events.
+  const { status: authStatus } = useActiveAccount()
+  // A turn already running for another account when the panel opened sends no event until its
+  // next step, so ask main which turn runs, once and again when another account's chats change.
+  // Not by listing their chats: main makes a first chat for an account that has none.
+  const [otherStreaming, setOtherStreaming] = useState<{
+    accountId: string
+    sessionId: string
+  } | null>(null)
+  useEffect(() => {
+    if (!authStatus) return
+    const active = authStatus.activeAccountId
+    let live = true
+    const check = (): void => {
+      window.opencat.agent
+        .running()
+        .then((turn) => {
+          if (!live) return
+          setOtherStreaming(
+            turn && turn.accountId !== null && turn.accountId !== active
+              ? { accountId: turn.accountId, sessionId: turn.sessionId }
+              : null
+          )
+        })
+        .catch(() => {})
+    }
+    check()
+    const off = window.opencat.chat.sessions.onChanged((event) => {
+      if (event.accountId !== active) check()
+    })
+    return () => {
+      live = false
+      off()
+    }
+  }, [authStatus])
+  // Where the other account's reply is running: from its events, or from its chat list on open.
+  const busyTurn = chat.busy ?? otherStreaming
+  const busyAccount = busyTurn ? busyTurn.accountId : undefined
+  const otherAccountBusy =
+    answeringElsewhere === null &&
+    busyAccount !== undefined &&
+    authStatus !== null &&
+    busyAccount !== authStatus.activeAccountId
+      ? (authStatus.accounts.find((a) => a.id === busyAccount)?.handle ?? null)
+      : undefined
+  const [menuOpen, setMenuOpen] = useState(false)
+  const titleRef = useRef<HTMLButtonElement>(null)
+  const rootRef = useRef<HTMLDivElement>(null)
+  // Bumped to put the cursor in the message box once the new chat is drawn.
+  const [composerFocus, setComposerFocus] = useState(focusComposer ? 1 : 0)
   const attachments = useAttachments()
   // Counts dragenter/dragleave pairs, which fire for every child the files pass over.
   const [dragDepth, setDragDepth] = useState(0)
@@ -231,6 +328,24 @@ function Conversation({
     if (list) list.scrollTop = list.scrollHeight
   }, [chat.messages, chat.streaming, chat.tool, chat.error])
 
+  const closeMenu = useCallback((refocus: boolean): void => {
+    setMenuOpen(false)
+    if (refocus) titleRef.current?.focus()
+  }, [])
+
+  // From the menu, the header's pen, ⌘N in the panel or the collapsed rail: an empty chat, ready
+  // to type in. The conversation empties when the open chat changes.
+  const newChat = useCallback(async (): Promise<void> => {
+    setMenuOpen(false)
+    setShowSettings(false)
+    if (await sessions.create()) setComposerFocus((n) => n + 1)
+  }, [sessions, setShowSettings])
+
+  useEffect(() => {
+    if (!composerFocus) return
+    rootRef.current?.querySelector<HTMLElement>('textarea[aria-label="Message the agent"]')?.focus()
+  }, [composerFocus])
+
   const empty =
     chat.loaded &&
     chat.messages.length === 0 &&
@@ -240,7 +355,16 @@ function Conversation({
 
   return (
     <div
+      ref={rootRef}
       className="flex min-h-0 flex-1 flex-col"
+      // ⌘N (Ctrl+N elsewhere) while focus is in the panel only; the rest of the app keeps it.
+      onKeyDown={(e) => {
+        if (e.key.toLowerCase() !== 'n' || !(e.metaKey || e.ctrlKey) || e.altKey || e.shiftKey) {
+          return
+        }
+        e.preventDefault()
+        void newChat()
+      }}
       onDragEnter={(e) => {
         if (showSettings || !hasFiles(e)) return
         e.preventDefault()
@@ -265,9 +389,23 @@ function Conversation({
         >
           <Sparkles size={15} />
         </span>
-        <span className="flex min-w-0 flex-1 flex-col">
-          <h2 className="m-0 text-[14px] font-semibold">Agent</h2>
-          {status && <ProviderPill status={status} />}
+        <span className="flex min-w-0 flex-1 flex-col items-start gap-px">
+          {/* The open chat's title opens the chat list (Pencil "OP-95 · Sessions"). */}
+          <h2 className="m-0 flex max-w-full min-w-0 text-[14px] font-semibold">
+            <button
+              ref={titleRef}
+              type="button"
+              className="flex max-w-full min-w-0 cursor-pointer items-center gap-1 rounded-[4px] border-0 bg-transparent p-0 font-sans text-[14px] font-semibold text-ds-text"
+              aria-haspopup="menu"
+              aria-expanded={menuOpen}
+              title={sessions.current ? `${sessions.current.title}: switch chats` : 'Chats'}
+              onClick={() => setMenuOpen((was) => !was)}
+            >
+              <span className="min-w-0 truncate">{sessions.current?.title ?? 'Agent'}</span>
+              <ChevronDown size={14} className="shrink-0 text-ds-text-3" aria-hidden="true" />
+            </button>
+          </h2>
+          {status && <ProviderPill status={status} handle={sessions.handle} />}
         </span>
         {confirmClear ? (
           <span className="flex items-center gap-1.5 text-[12px] text-ds-text-2">
@@ -289,6 +427,15 @@ function Conversation({
           </span>
         ) : (
           <span className="flex items-center gap-0.5">
+            <button
+              type="button"
+              className="grid size-8 cursor-pointer place-items-center rounded-lg border-0 bg-transparent text-ds-text-3 hover:text-ds-text"
+              onClick={() => void newChat()}
+              aria-label="New chat"
+              title={`New chat (${newChatShortcut()})`}
+            >
+              <SquarePen size={16} aria-hidden="true" />
+            </button>
             <button
               type="button"
               className="grid size-8 cursor-pointer place-items-center rounded-lg border-0 bg-transparent text-ds-text-3 hover:text-ds-text"
@@ -330,6 +477,23 @@ function Conversation({
           </span>
         )}
       </header>
+      {menuOpen && (
+        <SessionMenu
+          sessions={sessions.list}
+          handle={sessions.handle}
+          error={sessions.error}
+          triggerRef={titleRef}
+          onNew={() => void newChat()}
+          onSelect={(id) => {
+            closeMenu(false)
+            setShowSettings(false)
+            if (id !== sessions.current?.id) void sessions.select(id)
+          }}
+          onRename={sessions.rename}
+          onDelete={sessions.remove}
+          onClose={closeMenu}
+        />
+      )}
 
       {showSettings &&
         (status ? (
@@ -398,7 +562,49 @@ function Conversation({
       {!showSettings && (
         <Composer
           disabled={status !== null && !status.ready && !chat.running}
+          blocked={answeringElsewhere !== null || otherAccountBusy !== undefined}
           running={chat.running}
+          notice={
+            answeringElsewhere ? (
+              <>
+                The agent is answering in “{answeringElsewhere.title}”. You can send here once it
+                finishes.{' '}
+                <button
+                  type="button"
+                  className="cursor-pointer border-0 bg-transparent p-0 font-sans text-[12px] font-medium text-ds-accent-text"
+                  onClick={() => void sessions.select(answeringElsewhere.id)}
+                >
+                  Open it
+                </button>
+              </>
+            ) : otherAccountBusy !== undefined ? (
+              <>
+                The agent is answering
+                {otherAccountBusy ? ` for @${otherAccountBusy}` : ' in another account'}. You can
+                send here once it finishes.{' '}
+                <button
+                  type="button"
+                  className="cursor-pointer border-0 bg-transparent p-0 font-sans text-[12px] font-medium text-ds-accent-text"
+                  onClick={() => {
+                    const turn = busyTurn
+                    if (!turn || turn.accountId === null) return
+                    // Switch account first, so its chats become the list, then open the answering one.
+                    const sessionId = turn.sessionId
+                    void window.opencat.auth
+                      .setActive(turn.accountId)
+                      .then(() =>
+                        sessionId ? window.opencat.chat.sessions.setActive(sessionId) : null
+                      )
+                      .catch(() => undefined)
+                  }}
+                >
+                  Open it
+                </button>
+              </>
+            ) : notice ? (
+              <span className="text-ds-red">{notice}</span>
+            ) : null
+          }
           recording={chat.tool === 'render_video'}
           attachments={attachments}
           onSend={(text, mediaIds, mode, videoSeconds) =>
@@ -520,7 +726,14 @@ function Message({
 }
 
 /** Who answers the next message, and whether it can. */
-function ProviderPill({ status }: { status: AgentStatus }): React.JSX.Element {
+function ProviderPill({
+  status,
+  handle
+}: {
+  status: AgentStatus
+  /** The active X account, whose chats these are (OP-95). */
+  handle: string | null
+}): React.JSX.Element {
   const cli = status.provider === 'cli'
   const label = cli ? 'Claude Code' : status.hasKey ? 'API key' : 'Not set up'
   const state = status.ready ? 'ready' : cli ? 'login' : 'none'
@@ -533,15 +746,17 @@ function ProviderPill({ status }: { status: AgentStatus }): React.JSX.Element {
       : 'The agent is not set up yet'
   return (
     <span
-      className="provider-pill flex items-center gap-[5px] text-[11px] text-ds-text-3"
+      className="provider-pill flex max-w-full min-w-0 items-center gap-[5px] text-[11px] text-ds-text-3"
       data-state={state}
       title={title}
     >
       <span
-        className={`size-1.5 rounded-full ${state === 'ready' ? 'bg-ds-green' : state === 'login' ? 'bg-ds-amber' : 'bg-ds-text-3'}`}
+        className={`size-1.5 shrink-0 rounded-full ${state === 'ready' ? 'bg-ds-green' : state === 'login' ? 'bg-ds-amber' : 'bg-ds-text-3'}`}
         aria-hidden
       />
       {label}
+      {/* A span of its own, so a long handle is cut rather than the provider. */}
+      {handle && <span className="-ml-[5px] min-w-0 truncate">&nbsp;· @{handle}</span>}
     </span>
   )
 }

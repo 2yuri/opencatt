@@ -249,11 +249,15 @@ describe('AgentSession per account', () => {
     )
     chat.append({ role: 'user', content: 'Old B message', accountId: 'B', sessionId: 'B' })
 
+    expect(session.runningTurn()).toBeNull()
     const started = session.send('Write for alpha')
     expect(started.accountId).toBe('A')
     active = { id: 'B', handle: 'beta', name: null }
+    // Still A's turn in A's chat, whoever is active now (OP-96).
+    expect(session.runningTurn()).toEqual({ accountId: 'A', sessionId: started.sessionId })
     release()
     await session.idle
+    expect(session.runningTurn()).toBeNull()
 
     expect(seen).toEqual([{ account: 'A', scope: 'A', history: ['Write for alpha'] }])
     expect(scope.current).toBeNull()

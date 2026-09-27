@@ -10,3 +10,8 @@ export function ignoreShortcut(event: KeyboardEvent): boolean {
     target.closest('input, textarea, select, [contenteditable], [role="dialog"]') !== null
   )
 }
+
+/** The agent panel's New chat key (OP-95): ⌘N on macOS, Ctrl+N elsewhere, as main.tsx marks it. */
+export function newChatShortcut(): string {
+  return document.documentElement.dataset['platform'] === 'mac' ? '⌘N' : 'Ctrl+N'
+}

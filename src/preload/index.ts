@@ -69,6 +69,7 @@ const api: OpenCatApi = {
     capabilities: () => ipcRenderer.invoke(IpcChannel.AgentCapabilities),
     retry: () => ipcRenderer.invoke(IpcChannel.AgentRetry),
     cancel: () => ipcRenderer.invoke(IpcChannel.AgentCancel),
+    running: () => ipcRenderer.invoke(IpcChannel.AgentRunning),
     onEvent: (listener) => {
       const handler = (_e: IpcRendererEvent, event: AgentEvent): void => listener(event)
       ipcRenderer.on(IpcEvent.Agent, handler)

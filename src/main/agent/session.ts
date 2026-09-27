@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto'
 import type {
   AgentErrorCode,
   AgentEvent,
+  AgentRunningTurn,
   AgentTurnStarted,
   ChatMessage,
   ChatSession,
@@ -114,7 +115,7 @@ interface Place {
  * history: it saves the user's message, the streamed reply and tool results, in order.
  */
 export class AgentSession {
-  private running: { turnId: string; abort: AbortController } | null = null
+  private running: { turnId: string; abort: AbortController; place: Place } | null = null
   private closed = false
 
   /** Resolves when the running turn, if any, has finished. */
@@ -169,6 +170,13 @@ export class AgentSession {
 
   cancel(): void {
     this.running?.abort.abort()
+  }
+
+  /** The running turn's account and chat, or null when none runs (OP-96). */
+  runningTurn(): AgentRunningTurn | null {
+    if (!this.running) return null
+    const { accountId, sessionId } = this.running.place
+    return { accountId, sessionId }
   }
 
   /** The active chat of the active account, which is what the chat panel shows. */
@@ -246,7 +254,7 @@ export class AgentSession {
 
   private start(turnId: string, place: Place): AgentTurnStarted {
     const abort = new AbortController()
-    this.running = { turnId, abort }
+    this.running = { turnId, abort, place }
     this.scope.current = place.account
     this.scope.session = place.sessionId
     this.scope.signal = abort.signal

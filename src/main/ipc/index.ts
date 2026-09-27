@@ -151,6 +151,7 @@ export function registerIpc(
   ipcMain.handle(IpcChannel.AgentCapabilities, () => capabilities())
   ipcMain.handle(IpcChannel.AgentRetry, () => agent.retry())
   ipcMain.handle(IpcChannel.AgentCancel, () => agent.cancel())
+  ipcMain.handle(IpcChannel.AgentRunning, () => agent.runningTurn())
   ipcMain.handle(IpcChannel.AgentStatus, () => agentSettings.status())
   ipcMain.handle(IpcChannel.AgentSetKey, (_e, key) => agentSettings.setKey(key))
   ipcMain.handle(IpcChannel.AgentClearKey, () => agentSettings.clearKey())

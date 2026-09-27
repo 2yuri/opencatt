@@ -5,6 +5,8 @@ import type {
   AuthStatus,
   McpStatus,
   ChatMessage,
+  ChatSession,
+  ChatSessionsChanged,
   JsonValue,
   MediaProgressEvent,
   OpenCatApi,
@@ -49,6 +51,30 @@ export interface FakeApi {
   voiceChanged(accountId: string, profile: VoiceProfile): void
   /** The writing guide and Video mode's prompt, as main keeps them. */
   prompts: { writing: WritingPrompt; video: WritingPrompt }
+  /**
+   * The chats chat.sessions keeps (OP-94), every account's; none until a test adds some, when
+   * chat.list answers `history` as before chats.
+   */
+  sessions: ChatSession[]
+  /** Each chat's messages by chat id; chat.list answers the open chat's, `history` for the rest. */
+  chatMessages: Map<string, ChatMessage[]>
+  /** Tells the renderer an account's chats changed, as main does; the active account's by default. */
+  sessionsChanged(accountId?: string | null): void
+}
+
+/** A chat as chat.sessions lists it; the fields given win. */
+export function chatSession(fields: Partial<ChatSession> & Pick<ChatSession, 'id'>): ChatSession {
+  const at = new Date().toISOString()
+  return {
+    accountId: null,
+    title: 'New chat',
+    createdAt: at,
+    updatedAt: at,
+    archived: false,
+    active: false,
+    streaming: false,
+    ...fields
+  }
 }
 
 /** A voice with main's defaults, and any fields given. */
@@ -199,6 +225,34 @@ export function fakeApi(history: ChatMessage[] = []): FakeApi {
       return Promise.resolve({ ...prompts[which] })
     })
   })
+  // Chats, kept like main's ChatSessionStore: one open chat per account, newest first.
+  const sessions: ChatSession[] = []
+  const chatMessages = new Map<string, ChatMessage[]>()
+  const sessionListeners = new Set<(e: ChatSessionsChanged) => void>()
+  let sessionId = 0
+  const sessionsChanged = (accountId?: string | null): void => {
+    const event = { accountId: accountId === undefined ? authStatus.activeAccountId : accountId }
+    sessionListeners.forEach((l) => l(event))
+  }
+  const accountOf = (accountId?: string | null): string | null =>
+    accountId === undefined ? authStatus.activeAccountId : accountId
+  const listSessions = (accountId?: string | null): ChatSession[] =>
+    sessions
+      .filter((s) => s.accountId === accountOf(accountId))
+      .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
+      .map((s) => ({ ...s }))
+  const openSession = (id: string): ChatSession => {
+    const found = sessions.find((s) => s.id === id)
+    if (!found) throw new Error('That chat no longer exists.')
+    for (const s of sessions) if (s.accountId === found.accountId) s.active = s.id === id
+    return found
+  }
+  const newSession = (accountId: string | null): ChatSession => {
+    const made = chatSession({ id: `chat-${++sessionId}`, accountId })
+    sessions.push(made)
+    openSession(made.id)
+    return made
+  }
   const writing = prompt('writing', DEFAULT_WRITING_GUIDE, 20_000)
   const video = prompt('video', DEFAULT_VIDEO_PROMPT, 4_000)
 
@@ -284,21 +338,79 @@ export function fakeApi(history: ChatMessage[] = []): FakeApi {
       resetPrePrompt: video.reset
     },
     chat: {
-      list: vi.fn(() => Promise.resolve(history)),
+      list: vi.fn(() => {
+        const open = listSessions().find((s) => s.active)
+        return Promise.resolve((open && chatMessages.get(open.id)) ?? history)
+      }),
       clear: vi.fn(() => Promise.resolve()),
+      // Like main (OP-94): each change tells every window.
       sessions: {
-        list: vi.fn(() => Promise.resolve([])),
-        create: vi.fn(() => Promise.reject(new Error('not faked'))),
-        rename: vi.fn(() => Promise.reject(new Error('not faked'))),
-        delete: vi.fn(() => Promise.resolve()),
-        setActive: vi.fn(() => Promise.reject(new Error('not faked'))),
-        onChanged: vi.fn(() => () => {})
+        list: vi.fn((accountId?: string | null) => Promise.resolve(listSessions(accountId))),
+        create: vi.fn((accountId?: string | null) => {
+          const made = newSession(accountOf(accountId))
+          sessionsChanged(made.accountId)
+          return Promise.resolve({ ...made })
+        }),
+        rename: vi.fn((id: string, title: string) => {
+          const value = title.trim()
+          if (!value) return Promise.reject(new Error('Give the chat a name.'))
+          if (value.length > 80) {
+            return Promise.reject(new Error('Keep the name under 80 characters.'))
+          }
+          const found = sessions.find((s) => s.id === id)
+          if (!found) return Promise.reject(new Error('That chat no longer exists.'))
+          found.title = value
+          sessionsChanged(found.accountId)
+          return Promise.resolve({ ...found })
+        }),
+        delete: vi.fn((id: string) => {
+          const at = sessions.findIndex((s) => s.id === id)
+          const found = sessions[at]
+          if (!found) return Promise.reject(new Error('That chat no longer exists.'))
+          if (found.streaming) {
+            return Promise.reject(
+              new Error(
+                "Error invoking remote method 'chat:sessions:delete': Error: The agent is still answering in that chat"
+              )
+            )
+          }
+          sessions.splice(at, 1)
+          chatMessages.delete(id)
+          // The open chat goes to the newest left, or a new one when none is.
+          if (found.active) {
+            const next = listSessions(found.accountId)[0]
+            if (next) openSession(next.id)
+            else newSession(found.accountId)
+          }
+          sessionsChanged(found.accountId)
+          return Promise.resolve()
+        }),
+        setActive: vi.fn((id: string) => {
+          try {
+            const opened = openSession(id)
+            sessionsChanged(opened.accountId)
+            return Promise.resolve({ ...opened })
+          } catch (err) {
+            return Promise.reject(err as Error)
+          }
+        }),
+        onChanged: vi.fn((listener: (e: ChatSessionsChanged) => void) => {
+          sessionListeners.add(listener)
+          return () => sessionListeners.delete(listener)
+        })
       }
     },
     agent: {
       send: vi.fn(() => Promise.resolve({ turnId: 't1' })),
       retry: vi.fn(() => Promise.resolve({ turnId: 't2' })),
       cancel: vi.fn(() => Promise.resolve()),
+      // Like main: the one streaming chat, on any account.
+      running: vi.fn(() => {
+        const answering = sessions.find((s) => s.streaming)
+        return Promise.resolve(
+          answering ? { accountId: answering.accountId, sessionId: answering.id } : null
+        )
+      }),
       onEvent: (listener: (e: AgentEvent) => void) => {
         agentListeners.add(listener)
         return () => agentListeners.delete(listener)
@@ -390,6 +502,9 @@ export function fakeApi(history: ChatMessage[] = []): FakeApi {
     voices,
     voiceChanged,
     prompts,
+    sessions,
+    chatMessages,
+    sessionsChanged,
     emit: (event) =>
       agentListeners.forEach((l) =>
         l({ accountId: null, sessionId: null, ...event } as AgentEvent)

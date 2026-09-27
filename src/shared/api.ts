@@ -41,6 +41,7 @@ export const IpcChannel = {
   WritingPromptReset: 'voice:writingPrompt:reset',
   AgentRetry: 'agent:retry',
   AgentCancel: 'agent:cancel',
+  AgentRunning: 'agent:running',
   MediaImport: 'media:import',
   MediaSavePasted: 'media:savePasted',
   MediaPick: 'media:pick',
@@ -440,6 +441,12 @@ export interface AgentTurnStarted {
   sessionId: string | null
 }
 
+/** Where the one running turn answers (OP-96). */
+export interface AgentRunningTurn {
+  accountId: string | null
+  sessionId: string
+}
+
 export interface AgentModel {
   id: string
   label: string
@@ -496,6 +503,8 @@ export interface AgentApi {
   retry(): Promise<AgentTurnStarted>
   /** Stops the running turn, if any. */
   cancel(): Promise<void>
+  /** The turn running now, for any account, or null (OP-96). */
+  running(): Promise<AgentRunningTurn | null>
   /** Returns a function that stops listening. */
   onEvent(listener: (event: AgentEvent) => void): () => void
   status(): Promise<AgentStatus>
