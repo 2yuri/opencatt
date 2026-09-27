@@ -85,6 +85,20 @@ export function registerIpc(
   ipcMain.handle(IpcChannel.ChatList, () => agent.history())
   // Clearing goes through the session, so it can't empty the history under a running turn.
   ipcMain.handle(IpcChannel.ChatClear, () => agent.clear())
+  // An account's chats (OP-94).
+  const accountArg = (value: unknown): string | null | undefined =>
+    value === undefined ? undefined : value === null ? null : String(value)
+  ipcMain.handle(IpcChannel.ChatSessionsList, (_e, accountId) =>
+    agent.chatList(accountArg(accountId))
+  )
+  ipcMain.handle(IpcChannel.ChatSessionsCreate, (_e, accountId) =>
+    agent.newChat(accountArg(accountId))
+  )
+  ipcMain.handle(IpcChannel.ChatSessionsRename, (_e, id, title) =>
+    agent.renameChat(String(id), String(title ?? ''))
+  )
+  ipcMain.handle(IpcChannel.ChatSessionsDelete, (_e, id) => agent.deleteChat(String(id)))
+  ipcMain.handle(IpcChannel.ChatSessionsSetActive, (_e, id) => agent.setActiveChat(String(id)))
 
   ipcMain.handle(IpcChannel.OnboardingStatus, () => onboarding.status())
   ipcMain.handle(IpcChannel.OnboardingSaveClientId, (_e, id) => onboarding.saveClientId(id))

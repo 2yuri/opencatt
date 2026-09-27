@@ -4,6 +4,7 @@ import {
   IpcEvent,
   type AgentEvent,
   type AuthStatus,
+  type ChatSessionsChanged,
   type MediaProgressEvent,
   type OpenCatApi,
   type PostsChangedEvent,
@@ -48,7 +49,19 @@ const api: OpenCatApi = {
   },
   chat: {
     list: () => ipcRenderer.invoke(IpcChannel.ChatList),
-    clear: () => ipcRenderer.invoke(IpcChannel.ChatClear)
+    clear: () => ipcRenderer.invoke(IpcChannel.ChatClear),
+    sessions: {
+      list: (accountId) => ipcRenderer.invoke(IpcChannel.ChatSessionsList, accountId),
+      create: (accountId) => ipcRenderer.invoke(IpcChannel.ChatSessionsCreate, accountId),
+      rename: (id, title) => ipcRenderer.invoke(IpcChannel.ChatSessionsRename, id, title),
+      delete: (id) => ipcRenderer.invoke(IpcChannel.ChatSessionsDelete, id),
+      setActive: (id) => ipcRenderer.invoke(IpcChannel.ChatSessionsSetActive, id),
+      onChanged: (listener) => {
+        const handler = (_e: IpcRendererEvent, event: ChatSessionsChanged): void => listener(event)
+        ipcRenderer.on(IpcEvent.ChatSessionsChanged, handler)
+        return () => ipcRenderer.off(IpcEvent.ChatSessionsChanged, handler)
+      }
+    }
   },
   agent: {
     send: (text, mediaIds, mode, videoSeconds) =>

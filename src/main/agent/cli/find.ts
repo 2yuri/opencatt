@@ -1,6 +1,6 @@
 import { existsSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { delimiter, dirname, join } from 'node:path'
+import { dirname, posix, win32 } from 'node:path'
 
 export interface ClaudeCommand {
   /** What to spawn. */
@@ -31,15 +31,16 @@ export function findClaude(options: FindOptions = {}): ClaudeCommand | null {
   const home = options.home ?? homedir()
   const exists = options.exists ?? existsSync
   const win = platform === 'win32'
-  const join_ = win ? (...p: string[]) => p.join('\\') : join
+  // The requested platform's path rules, not the host's, so a lookup is the same on any OS (OP-92).
+  const { join, delimiter } = win ? win32 : posix
 
   const dirs = [
-    ...(env['PATH'] ?? env['Path'] ?? '').split(win ? ';' : delimiter).filter(Boolean),
+    ...(env['PATH'] ?? env['Path'] ?? '').split(delimiter).filter(Boolean),
     ...(win
       ? [
-          join_(home, '.local', 'bin'),
-          ...(env['APPDATA'] ? [join_(env['APPDATA'], 'npm')] : []),
-          ...(env['LOCALAPPDATA'] ? [join_(env['LOCALAPPDATA'], 'Programs', 'claude')] : [])
+          join(home, '.local', 'bin'),
+          ...(env['APPDATA'] ? [join(env['APPDATA'], 'npm')] : []),
+          ...(env['LOCALAPPDATA'] ? [join(env['LOCALAPPDATA'], 'Programs', 'claude')] : [])
         ]
       : [
           join(home, '.local', 'bin'),
@@ -52,10 +53,10 @@ export function findClaude(options: FindOptions = {}): ClaudeCommand | null {
 
   for (const dir of dirs) {
     if (win) {
-      const exe = join_(dir, 'claude.exe')
+      const exe = join(dir, 'claude.exe')
       if (exists(exe)) return { command: exe, prefix: [] }
-      const shim = join_(dir, 'claude.cmd')
-      const script = join_(dir, 'node_modules', '@anthropic-ai', 'claude-code', 'cli.js')
+      const shim = join(dir, 'claude.cmd')
+      const script = join(dir, 'node_modules', '@anthropic-ai', 'claude-code', 'cli.js')
       if (exists(shim) && exists(script)) {
         return {
           command: options.execPath ?? process.execPath,

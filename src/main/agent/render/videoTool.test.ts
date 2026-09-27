@@ -162,3 +162,48 @@ describe('recorder pieces', () => {
     expect(recordArgs({ width: 2, height: 2, seconds: 1 }, 'o', 'win32')).toContain('h264_mf')
   })
 })
+
+describe('render_video recordings per turn (OP-91)', () => {
+  it('counts every recording, says how many are left, and refuses a fourth', async () => {
+    let used = 0
+    const record = vi.fn<VideoRecorder['record']>(async (_html, spec) => {
+      if (used === 3) throw new RenderError('The composition broke.')
+      return { path: '/tmp/x.mp4', poster: Buffer.from('png'), seconds: spec.seconds }
+    })
+    const tool = renderVideoTool(
+      { record },
+      {
+        import: (_path, video): PostMedia => ({
+          id: 'v1',
+          kind: 'video',
+          mime: 'video/mp4',
+          bytes: 1,
+          width: video.width,
+          height: video.height,
+          durationMs: video.durationMs,
+          alt: null,
+          url: 'opencat-media://media/v1.mp4'
+        })
+      },
+      () => null,
+      () => null,
+      undefined,
+      { used: () => used, add: () => void used++ }
+    )
+    const run = (): ReturnType<typeof callTool> =>
+      callTool([tool], 'render_video', { html: '<p>go</p>', seconds: 2 })
+
+    expect(JSON.parse((await run()).content).recordings_left).toBe(
+      '2 of 3 recordings left this turn. Record again only for a real fault you can see in the frame.'
+    )
+    expect(JSON.parse((await run()).content).recordings_left).toMatch(/^1 of 3/)
+    // A recording that fails still counts: it took its time.
+    expect((await run()).isError).toBe(true)
+    expect(used).toBe(3)
+
+    const refused = await run()
+    expect(refused.isError).toBe(true)
+    expect(JSON.parse(refused.content).error).toContain("You've recorded 3 videos this turn")
+    expect(record).toHaveBeenCalledTimes(3)
+  })
+})

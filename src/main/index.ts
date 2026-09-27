@@ -180,6 +180,8 @@ void app.whenReady().then(() => {
     safeStorageCipher
   )
   const config = new AgentConfig(agentSecrets, stores.settings)
+  // Installs from before the default moved to Opus 5.5 keep Opus 5 (OP-93).
+  config.keepPreviousDefault()
   // The in-app agent's tools; outside MCP clients get their own, marked as such.
   // It may attach only files the user gave it in this chat.
   const chat = stores.chat
@@ -213,7 +215,8 @@ void app.whenReady().then(() => {
     stores.posts,
     undefined,
     'agent',
-    (account) => chat.mediaIds(account),
+    // The files in the turn's own chat (OP-94); none outside a turn.
+    () => (turnScope.session ? chat.mediaIds(turnScope.session) : new Set<string>()),
     {
       forCall: () => turnScope.current?.id ?? null,
       attached: () => turnScope.attached
@@ -236,7 +239,7 @@ void app.whenReady().then(() => {
     })
   // The user's attachments a render may place as they are, as asset://<media id> (OP-89).
   const renderAssets: AssetSource = {
-    allowed: () => chat.mediaIds(turnScope.current?.id ?? null),
+    allowed: () => (turnScope.session ? chat.mediaIds(turnScope.session) : new Set<string>()),
     lookup: (id) => {
       const found = media.get(id)
       return found ? { kind: found.kind, path: media.pathOf(id) } : null
@@ -270,7 +273,8 @@ void app.whenReady().then(() => {
       media,
       () => turnScope.signal,
       (png) => (png.length ? { mediaType: 'image/png', data: png.toString('base64') } : null),
-      renderAssets
+      renderAssets,
+      { used: () => turnScope.videos, add: () => void turnScope.videos++ }
     )
   ]
   const runner = new AnthropicRunner(config, tools, undefined, undefined, images)
@@ -283,12 +287,18 @@ void app.whenReady().then(() => {
     workDir: join(userData, 'agent-cli'),
     settings: stores.settings,
     model: () => config.model(),
-    images
+    images,
+    chats: stores.chatSessions
   })
-  const agentSettings = new AgentSettings(config, (key) => runner.checkKey(key), {
-    found: () => findClaude() !== null,
-    detect: () => detectClaude(() => findClaude())
-  })
+  const agentSettings = new AgentSettings(
+    config,
+    (key) => runner.checkKey(key),
+    {
+      found: () => findClaude() !== null,
+      detect: () => detectClaude(() => findClaude())
+    },
+    (key) => runner.listModels(key)
+  )
   const prePrompt = new VideoPrePromptStore(stores.settings)
   agent = new AgentSession(
     stores.chat,
@@ -310,7 +320,9 @@ void app.whenReady().then(() => {
     // Video mode's showreel pre-prompt (OP-81), with the length filled in, before the user's text.
     (mode, text, videoSeconds) =>
       mode === 'video' ? videoPreface(prePrompt.get().text, text, videoSeconds) : null,
-    () => writing.get().text
+    () => writing.get().text,
+    stores.chatSessions,
+    (accountId) => broadcast(IpcEvent.ChatSessionsChanged, { accountId })
   )
 
   // Off until the user turns it on; the same tools, minus editing and deleting.
@@ -349,7 +361,10 @@ void app.whenReady().then(() => {
     openBrowser: (url) => shell.openExternal(url),
     onChanged: (status) => {
       // The conversation from before any account goes to the first one, like its posts do.
-      if (status.activeAccountId) chat.assignAccount(status.activeAccountId)
+      if (status.activeAccountId) {
+        chat.assignAccount(status.activeAccountId)
+        stores!.chatSessions.assignAccount(status.activeAccountId)
+      }
       broadcast(IpcEvent.AuthChanged, status)
       for (const account of status.accounts) {
         if (!account.needsReconnect) publisher?.signedIn(account.id)

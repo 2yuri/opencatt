@@ -35,7 +35,13 @@ describe('AgentSession', () => {
     ])
     expect(events.map((e) => e.type)).toEqual(['message', 'text', 'text', 'message', 'done'])
     expect(events.every((e) => e.turnId === turnId)).toBe(true)
-    expect(events.at(-1)).toEqual({ type: 'done', turnId, accountId: null, stopped: false })
+    expect(events.at(-1)).toEqual({
+      type: 'done',
+      turnId,
+      accountId: null,
+      sessionId: 'chat',
+      stopped: false
+    })
   })
 
   it('saves who answered on the replies only, as it was when the turn started', async () => {
@@ -112,7 +118,13 @@ describe('AgentSession', () => {
       ['user', 'Go'],
       ['assistant', 'Half a']
     ])
-    expect(events.at(-1)).toEqual({ type: 'done', turnId, accountId: null, stopped: true })
+    expect(events.at(-1)).toEqual({
+      type: 'done',
+      turnId,
+      accountId: null,
+      sessionId: 'chat',
+      stopped: true
+    })
   })
 
   it('reports errors with their code, and retry runs again without a new user message', async () => {
@@ -132,6 +144,7 @@ describe('AgentSession', () => {
       type: 'error',
       turnId: first.turnId,
       accountId: null,
+      sessionId: 'chat',
       code: 'no_key',
       message: 'Add your Anthropic key'
     })
@@ -234,7 +247,7 @@ describe('AgentSession per account', () => {
       () => active,
       scope
     )
-    chat.append({ role: 'user', content: 'Old B message', accountId: 'B' })
+    chat.append({ role: 'user', content: 'Old B message', accountId: 'B', sessionId: 'B' })
 
     const started = session.send('Write for alpha')
     expect(started.accountId).toBe('A')

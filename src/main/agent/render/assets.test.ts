@@ -90,4 +90,15 @@ describe('render assets (OP-89)', () => {
     })
     expect(JSON.parse(placed.content).attachment_note).toBeUndefined()
   })
+
+  it("lets a render load the turn's attachments even when the model leaves assets out", async () => {
+    const { media, logo, attached, assets } = setup()
+    attached.push(logo)
+    expect([...assetsInput(undefined, assets, ['image']).keys()]).toEqual([logo])
+    expect(assetsInput(undefined, assets, ['video']).size).toBe(0)
+
+    const tool = renderImageTool({ render: async () => PNG }, media, () => null, assets)
+    const out = await callTool([tool], 'render_image', { html: `<img src="asset://${logo}">` })
+    expect(JSON.parse(out.content).attachment_note).toBeUndefined()
+  })
 })

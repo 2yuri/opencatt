@@ -6,6 +6,8 @@
 # Usage: scripts/publish-public.sh [--push]
 #   PUBLIC_REPO   the public repo (default 2yuri/opencatt)
 #   SOURCE_REF    what to publish (default origin/main, fetched first)
+#   PUBLIC_AUTHOR_NAME / PUBLIC_AUTHOR_EMAIL   the snapshot's author (default: yuri,
+#                 hello@yuri.dev, the owner's)
 set -euo pipefail
 cd "$(dirname "$0")/.."
 PUBLIC_REPO=${PUBLIC_REPO:-2yuri/opencatt}
@@ -82,8 +84,11 @@ if git -C "$PUB" diff --cached --quiet; then
   [ "$PUSH" = --push ] && mirror_release
   exit 0
 fi
-# The public commit carries no private SHA, branch or PR number, and a noreply author.
-git -C "$PUB" -c user.name=OpenCatt -c user.email="$(gh api user --jq '.id')+$(gh api user --jq .login)@users.noreply.github.com" \
+# The public commit carries no private SHA, branch or PR number; its author is the owner, below.
+# Every public commit is the owner's, whoever runs the sync (the boss asked: this email, no other).
+AUTHOR_NAME=${PUBLIC_AUTHOR_NAME:-yuri}
+AUTHOR_EMAIL=${PUBLIC_AUTHOR_EMAIL:-hello@yuri.dev}
+git -C "$PUB" -c user.name="$AUTHOR_NAME" -c user.email="$AUTHOR_EMAIL" \
   commit -q -m "OpenCatt $VERSION" -m "Snapshot of the OpenCatt source on $(date -u +%Y-%m-%d)."
 echo "Snapshot commit: $(git -C "$PUB" log --oneline -1) ($(git -C "$PUB" rev-list --count HEAD) commit(s) in the public history)"
 git -C "$PUB" show --stat --format= HEAD | tail -1

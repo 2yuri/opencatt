@@ -1,5 +1,3 @@
-import { pathToFileURL } from 'node:url'
-import { net, type Session } from 'electron'
 import type { MediaKind } from '@shared/api'
 import { ToolInputError } from '../tools'
 
@@ -29,13 +27,10 @@ export interface AssetSource {
  */
 export function unplacedAssets(
   source: AssetSource | undefined,
-  used: RenderAssets,
+  html: string,
   kinds: readonly MediaKind[]
 ): Record<string, string> {
-  const ids = (source?.attached?.() ?? []).filter((id) => {
-    const kind = source?.lookup(id)?.kind
-    return kind !== undefined && kinds.includes(kind) && !used.has(id)
-  })
+  const ids = turnAttachments(source, kinds).filter((id) => !html.includes(`asset://${id}`))
   if (ids.length === 0) return {}
   return {
     attachment_note:
@@ -46,16 +41,29 @@ export function unplacedAssets(
   }
 }
 
-/** The `assets` argument of render_image or render_video, checked against what the user gave. */
+/** The running turn's attachments of the kinds a tool can place. */
+function turnAttachments(source: AssetSource | undefined, kinds: readonly MediaKind[]): string[] {
+  return (source?.attached?.() ?? []).filter((id) => {
+    const kind = source?.lookup(id)?.kind
+    return kind !== undefined && kinds.includes(kind)
+  })
+}
+
+/**
+ * The files a render may load: the `assets` argument, checked against what the user gave, plus
+ * the running turn's attachments always, so a page that names asset://<id> never finds it
+ * blocked because the model forgot to list it.
+ */
 export function assetsInput(
   value: unknown,
   source: AssetSource | undefined,
   kinds: readonly MediaKind[]
 ): RenderAssets {
-  if (value === undefined) return NO_ASSETS
+  const assets = new Map<string, string>()
+  for (const id of turnAttachments(source, kinds)) assets.set(id, source!.lookup(id)!.path)
+  if (value === undefined) return assets
   if (!Array.isArray(value)) throw new ToolInputError('assets must be an array of media ids')
   const allowed = source?.allowed() ?? new Set<string>()
-  const assets = new Map<string, string>()
   for (const [i, raw] of value.entries()) {
     if (typeof raw !== 'string' || !raw.trim()) {
       throw new ToolInputError(`assets[${i}] must be a media id`)
@@ -80,19 +88,6 @@ export function assetsInput(
 export function assetId(url: string): string | null {
   const match = /^asset:\/\/([^/?#]+)\/?$/i.exec(url)
   return match ? decodeURIComponent(match[1]!).toLowerCase() : null
-}
-
-/**
- * Serves asset://<id> on a render session from the current render's files only. `current` is
- * read per request, since one session serves one render at a time.
- */
-export function serveAssets(ses: Session, current: () => RenderAssets): void {
-  ses.protocol.handle(ASSET_SCHEME, (request) => {
-    const id = assetId(request.url)
-    const path = id ? current().get(id) : undefined
-    if (!path) return new Response('Not found', { status: 404 })
-    return net.fetch(pathToFileURL(path).toString(), { headers: request.headers })
-  })
 }
 
 /** Whether a render session lets a request through: data:, about:blank, and its own assets. */

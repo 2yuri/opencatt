@@ -6,7 +6,8 @@ import { h264Encoder } from '../../media/video'
 import { CLOCK_SCRIPT } from './clock'
 import { RenderError } from './tool'
 import { hyperframesRoot, isHyperframes, withHyperframes } from './hyperframes/page'
-import { NO_ASSETS, renderRequestAllowed, serveAssets, type RenderAssets } from './assets'
+import { serveAssets } from './assetProtocol'
+import { NO_ASSETS, renderRequestAllowed, type RenderAssets } from './assets'
 import {
   MAX_VIDEO_SECONDS,
   VIDEO_FPS,

@@ -51,11 +51,17 @@ function describeMedia(m: PostMedia): string {
  * the post either way; Image and Video also make the media and attach it.
  */
 export function modeNote(message: ChatMessage): string | null {
+  // The user's files by id, where the model decides what the design shows (OP-89).
+  const place = message.media.length
+    ? ` Their files go into the design as they are, never redrawn: ${message.media
+        .map((m) => `<${m.kind === 'video' ? 'video' : 'img'} src="asset://${m.id}">`)
+        .join(', ')}.`
+    : ''
   if (message.mode === 'image') {
-    return '(Mode: Generate image. Write the post, make one image for it with render_image and attach it to that post, next to any file the user attached unless they said to replace it.)'
+    return `(Mode: Generate image. Write the post, make one image for it with render_image and attach it to that post, next to any file the user attached unless they said to replace it.${place})`
   }
   if (message.mode === 'video') {
-    return '(Mode: Generate video. Write the post, record one video for it with render_video and attach it to that post, next to any file the user attached unless they said to replace it.)'
+    return `(Mode: Generate video. Write the post, record one video for it with render_video and attach it to that post, next to any file the user attached unless they said to replace it.${place})`
   }
   return null
 }

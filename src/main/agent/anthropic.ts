@@ -1,6 +1,7 @@
 import Anthropic from '@anthropic-ai/sdk'
 import type { ChatMessage } from '@shared/api'
 import type { AgentConfig } from './config'
+import type { ListedModel } from './models'
 import { AgentError, type AgentRunner, type AgentTurn } from './session'
 import { parseToolResult, toolNote } from '@shared/toolResult'
 import {
@@ -35,6 +36,16 @@ export interface ModelClient {
   ): AsyncIterable<StreamEvent> & { finalMessage(): Promise<Message> }
   /** Throws the SDK's error when the key is refused. */
   check(model: string): Promise<void>
+  /** The models this key can use, newest first (GET /v1/models). */
+  models(): Promise<ListedModel[]>
+}
+
+/** capabilities.thinking.types.adaptive.supported, when the API sent it. */
+function adaptiveOf(capabilities: unknown): boolean | null {
+  const adaptive = (
+    capabilities as { thinking?: { types?: { adaptive?: { supported?: unknown } } } }
+  )?.thinking?.types?.adaptive?.supported
+  return typeof adaptive === 'boolean' ? adaptive : null
 }
 
 export function anthropicClient(apiKey: string): ModelClient {
@@ -43,6 +54,17 @@ export function anthropicClient(apiKey: string): ModelClient {
     stream: (params, options) => client.beta.messages.stream(params, options),
     check: async (model) => {
       await client.models.retrieve(model)
+    },
+    models: async () => {
+      const list: ListedModel[] = []
+      for await (const m of client.models.list({ limit: 100 })) {
+        list.push({
+          id: m.id,
+          displayName: m.display_name,
+          adaptiveThinking: adaptiveOf((m as { capabilities?: unknown }).capabilities)
+        })
+      }
+      return list
     }
   }
 }
@@ -50,11 +72,6 @@ export function anthropicClient(apiKey: string): ModelClient {
 /** Tool calls in one turn before we stop, so a confused model can't loop on the user's key. */
 const MAX_STEPS = 12
 const MAX_TOKENS = 16_000
-
-/** Only Opus 5 is documented for fallbacks: "default". */
-const takesFallbacks = (model: string): boolean => model === 'claude-opus-5'
-const takesAdaptiveThinking = (model: string): boolean =>
-  model === 'claude-opus-5' || model === 'claude-sonnet-5'
 
 /**
  * The saved chat as the model's history. Built only from saved values, so every earlier turn
@@ -155,6 +172,15 @@ export class AnthropicRunner implements AgentRunner {
     private readonly images: ImageLoader = noImages
   ) {}
 
+  /** The models a key can use, for the picker (OP-93). */
+  async listModels(key: string): Promise<ListedModel[]> {
+    try {
+      return await this.connect(key).models()
+    } catch (err) {
+      throw toAgentError(err)
+    }
+  }
+
   /** Checks a key before it is saved. */
   async checkKey(key: string): Promise<void> {
     try {
@@ -171,6 +197,8 @@ export class AnthropicRunner implements AgentRunner {
     const client = this.client.client
 
     const model = this.config.model()
+    // What this model takes, from the model table or the API's list (OP-93).
+    const shape = this.config.shape(model)
     const messages: MessageParam[] = historyFor(turn.history, this.now(), this.images)
     const tools: Anthropic.Beta.Messages.BetaTool[] = this.tools.map((t) => ({
       name: t.name,
@@ -200,8 +228,8 @@ export class AnthropicRunner implements AgentRunner {
       ],
       tools,
       cache_control: { type: 'ephemeral' as const },
-      ...(takesAdaptiveThinking(model) ? { thinking: { type: 'adaptive' as const } } : {}),
-      ...(takesFallbacks(model)
+      ...(shape.adaptiveThinking ? { thinking: { type: 'adaptive' as const } } : {}),
+      ...(shape.fallbacks
         ? { betas: ['server-side-fallback-2026-07-01'], fallbacks: 'default' as const }
         : {})
     }

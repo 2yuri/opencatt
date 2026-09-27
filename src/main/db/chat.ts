@@ -23,16 +23,14 @@ interface ChatRow {
   account_id: string | null
   mode: string | null
   preface: string | null
+  session_id: string | null
 }
 
-/**
- * Which rows an account's conversation covers: its own, plus any from before an account was
- * connected (none once the first account has taken them).
- */
-function scope(account: string | null): { sql: string; params: string[] } {
-  return account === null
-    ? { sql: 'account_id IS NULL', params: [] }
-    : { sql: '(account_id = ? OR account_id IS NULL)', params: [account] }
+/** One chat's rows (OP-94), or every chat's when no chat is named. */
+function scope(session?: string): { sql: string; params: string[] } {
+  return session === undefined
+    ? { sql: '1', params: [] }
+    : { sql: 'session_id = ?', params: [session] }
 }
 
 const modeOf = (value: string | null): ComposerMode =>
@@ -54,9 +52,9 @@ export class ChatStore {
     private readonly now: () => Date = () => new Date()
   ) {}
 
-  /** An account's conversation, oldest first; null is the one from before any account. */
-  list(account: string | null = null): ChatMessage[] {
-    const where = scope(account)
+  /** A chat's messages, oldest first; every chat's when none is named. */
+  list(session?: string): ChatMessage[] {
+    const where = scope(session)
     const rows = this.db
       .prepare(`SELECT * FROM chat_messages WHERE ${where.sql} ORDER BY created_at, rowid`)
       .all(...where.params) as unknown as ChatRow[]
@@ -71,17 +69,17 @@ export class ChatStore {
       media: idsOf(row.media).flatMap((id) => media.get(id) ?? []),
       accountId: row.account_id,
       mode: modeOf(row.mode),
-      preface: row.preface
+      preface: row.preface,
+      sessionId: row.session_id
     }))
   }
 
   /**
-   * Media ids in an account's conversation, the user's attachments and the agent's renders: the
-   * ones the agent may attach there. Left out, every account's, which the media sweep keeps while
-   * the chat shows them.
+   * Media ids in a chat, the user's attachments and the agent's renders: the ones the agent may
+   * attach there. Left out, every chat's, which the media sweep keeps while the chat shows them.
    */
-  mediaIds(account?: string | null): Set<string> {
-    const where = account === undefined ? { sql: '1', params: [] } : scope(account)
+  mediaIds(session?: string): Set<string> {
+    const where = scope(session)
     const attached = this.db
       .prepare(`SELECT media FROM chat_messages WHERE media IS NOT NULL AND ${where.sql}`)
       .all(...where.params) as unknown as { media: string }[]
@@ -127,13 +125,14 @@ export class ChatStore {
       media: ids.map((id) => found.get(id)!),
       accountId: message.accountId ?? null,
       mode: modeOf(message.mode ?? null),
-      preface: message.preface ?? null
+      preface: message.preface ?? null,
+      sessionId: message.sessionId ?? null
     }
     this.db
       .prepare(
         `INSERT INTO chat_messages
-           (id, role, content, created_at, via, media, account_id, mode, preface)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+           (id, role, content, created_at, via, media, account_id, mode, preface, session_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .run(
         saved.id,
@@ -144,18 +143,19 @@ export class ChatStore {
         ids.length ? JSON.stringify(ids) : null,
         saved.accountId,
         saved.mode === 'text' ? null : saved.mode,
-        saved.preface
+        saved.preface,
+        saved.sessionId
       )
     return saved
   }
 
   /**
-   * Empties an account's conversation, leaving the others. Returns the media ids it held, for the
-   * caller to discard if unattached.
+   * Empties a chat, leaving the others; every chat when none is named. Returns the media ids it
+   * held, for the caller to discard if unattached.
    */
-  clear(account: string | null = null): string[] {
-    const ids = [...this.mediaIds(account)]
-    const where = scope(account)
+  clear(session?: string): string[] {
+    const ids = [...this.mediaIds(session)]
+    const where = scope(session)
     this.db.prepare(`DELETE FROM chat_messages WHERE ${where.sql}`).run(...where.params)
     return ids
   }

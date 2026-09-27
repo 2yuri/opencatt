@@ -220,6 +220,37 @@ export const migrations: string[] = [
   // edit of the pre-prompt never rewrites old messages.
   `
   ALTER TABLE chat_messages ADD COLUMN preface TEXT;
+  `,
+  // 15: several conversations per account (OP-94). Each account's messages, and the ones from
+  // before any account, become one chat called "Chat", which keeps the Claude Code session the
+  // account was in. title_set stops the first message from renaming a chat that has a title.
+  `
+  CREATE TABLE chat_sessions (
+    id TEXT PRIMARY KEY,
+    account_id TEXT,
+    title TEXT NOT NULL,
+    title_set INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    cli_session_id TEXT,
+    archived INTEGER NOT NULL DEFAULT 0
+  );
+  CREATE INDEX chat_sessions_account ON chat_sessions (account_id, updated_at);
+  ALTER TABLE chat_messages ADD COLUMN session_id TEXT;
+  INSERT INTO chat_sessions (id, account_id, title, title_set, created_at, updated_at, cli_session_id)
+    SELECT
+      lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) ||
+        '-a' || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6))),
+      m.account_id, 'Chat', 1, MIN(m.created_at), MAX(m.created_at),
+      COALESCE(
+        (SELECT value FROM settings WHERE key = 'agent.cliSession.' || m.account_id),
+        (SELECT value FROM settings WHERE key = 'agent.cliSession')
+      )
+    FROM chat_messages m
+    GROUP BY m.account_id;
+  UPDATE chat_messages
+    SET session_id = (SELECT s.id FROM chat_sessions s WHERE s.account_id IS chat_messages.account_id);
+  CREATE INDEX chat_messages_session ON chat_messages (session_id, created_at);
   `
 ]
 

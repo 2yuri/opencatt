@@ -54,23 +54,21 @@ describe('ChatStore media', () => {
 })
 
 describe('ChatStore per account', () => {
-  it('keeps each account its own conversation, and moves the one from before accounts to the first', () => {
+  it('keeps each chat its own messages and media (OP-94)', () => {
     const { chat, image } = setup()
     const early = image()
-    chat.append({ role: 'user', content: 'Before any account', media: [early] })
-    expect(chat.assignAccount('A')).toBe(1)
-    chat.append({ role: 'user', content: 'In A', accountId: 'A' })
-    chat.append({ role: 'user', content: 'In B', accountId: 'B' })
+    chat.append({ role: 'user', content: 'In one', media: [early], sessionId: 's1' })
+    chat.append({ role: 'user', content: 'In two', accountId: 'A', sessionId: 's2' })
 
-    expect(chat.list('A').map((m) => m.content)).toEqual(['Before any account', 'In A'])
-    expect(chat.list('B').map((m) => m.content)).toEqual(['In B'])
-    expect(chat.mediaIds('A')).toEqual(new Set([early]))
-    expect(chat.mediaIds('B')).toEqual(new Set())
+    expect(chat.list('s1').map((m) => m.content)).toEqual(['In one'])
+    expect(chat.list('s2').map((m) => [m.content, m.sessionId])).toEqual([['In two', 's2']])
+    expect(chat.mediaIds('s1')).toEqual(new Set([early]))
+    expect(chat.mediaIds('s2')).toEqual(new Set())
     expect(chat.mediaIds()).toEqual(new Set([early]))
 
-    expect(chat.clear('A')).toEqual([early])
-    expect(chat.list('A')).toEqual([])
-    expect(chat.list('B').map((m) => m.content)).toEqual(['In B'])
+    expect(chat.clear('s1')).toEqual([early])
+    expect(chat.list('s1')).toEqual([])
+    expect(chat.list('s2').map((m) => m.content)).toEqual(['In two'])
   })
 })
 

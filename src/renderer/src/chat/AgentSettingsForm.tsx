@@ -7,6 +7,9 @@ import { S } from './settingsStyles'
 
 const KEYS_URL = 'https://console.anthropic.com/settings/keys'
 
+/** The picker's Other… entry, never a real model id. */
+const OTHER = '__other__'
+
 interface Props {
   status: AgentStatus
   onChange: (status: AgentStatus) => void
@@ -29,6 +32,8 @@ export function AgentSettingsForm({
   const [replacing, setReplacing] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  // A model id typed under Other…, for the CLI (OP-93); null while the list is shown.
+  const [typedModel, setTypedModel] = useState<string | null>(null)
 
   const apply = async (call: () => Promise<AgentStatus>): Promise<boolean> => {
     setBusy(true)
@@ -180,16 +185,52 @@ export function AgentSettingsForm({
       <select
         aria-label="Model"
         className={S.select}
-        value={status.model}
+        value={typedModel === null ? status.model : OTHER}
         disabled={busy}
-        onChange={(e) => void apply(() => window.opencat.agent.setModel(e.target.value))}
+        onChange={(e) => {
+          const id = e.target.value
+          if (id === OTHER) {
+            setTypedModel('')
+            return
+          }
+          setTypedModel(null)
+          void apply(() => window.opencat.agent.setModel(id))
+        }}
       >
         {status.models.map((m) => (
           <option key={m.id} value={m.id}>
             {m.label}
           </option>
         ))}
+        {onCli && <option value={OTHER}>Other…</option>}
       </select>
+      {typedModel !== null && (
+        <form
+          className={S.row}
+          onSubmit={(e) => {
+            e.preventDefault()
+            void apply(() => window.opencat.agent.setModel(typedModel)).then(
+              (ok) => ok && setTypedModel(null)
+            )
+          }}
+        >
+          <input
+            aria-label="Model id"
+            className={S.keyInput}
+            placeholder="claude-opus-5-5"
+            value={typedModel}
+            autoFocus
+            spellCheck={false}
+            onChange={(e) => setTypedModel(e.target.value)}
+          />
+          <Button type="submit" size="sm" disabled={busy || typedModel.trim() === ''}>
+            Use
+          </Button>
+          <Button type="button" variant="secondary" size="sm" onClick={() => setTypedModel(null)}>
+            Cancel
+          </Button>
+        </form>
+      )}
       <p className={S.note}>
         Used by whichever one you picked above. With Claude Code it counts toward your plan&rsquo;s
         limits.

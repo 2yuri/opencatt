@@ -9,6 +9,14 @@ import { RenderError, type RenderSize } from './tool'
 
 export const VIDEO_FPS = 30
 export const MAX_VIDEO_SECONDS = 60
+/** Recordings one turn may make (OP-91): each takes as long as the video, and redoes add up. */
+export const MAX_RECORDINGS_PER_TURN = 3
+
+/** How many recordings the running turn has made. */
+export interface RecordingCount {
+  used(): number
+  add(): void
+}
 export const VIDEO_PRESETS = {
   landscape: { width: 1280, height: 720 },
   square: { width: 1080, height: 1080 }
@@ -70,7 +78,8 @@ export function renderVideoTool(
   signal: () => AbortSignal | null,
   toModel: (png: Buffer) => ModelImage | null,
   /** The user's attachments the composition may place as they are (OP-89). */
-  assets?: AssetSource
+  assets?: AssetSource,
+  recordings?: RecordingCount
 ): PostTool {
   return {
     name: 'render_video',
@@ -150,6 +159,16 @@ export function renderVideoTool(
         }
       }
 
+      if ((recordings?.used() ?? 0) >= MAX_RECORDINGS_PER_TURN) {
+        throw new ToolInputError(
+          `You've recorded ${MAX_RECORDINGS_PER_TURN} videos this turn, the most one turn may ` +
+            "make. Attach your best take and tell the user what you'd change; they can ask for " +
+            'another recording in their next message.'
+        )
+      }
+      // A recording that fails still took its time, so it counts.
+      recordings?.add()
+      const left = MAX_RECORDINGS_PER_TURN - (recordings?.used() ?? 0)
       let recording: Recording
       try {
         recording = await recorder.record(
@@ -180,7 +199,15 @@ export function renderVideoTool(
             'Recorded and shown to the user in the chat; the image is its middle frame. Attach ' +
             'it with create_posts or update_post media [{ "id": media_id }]. A video must be ' +
             'the only media in its post.',
-          ...unplacedAssets(assets, files, ['image', 'gif', 'video'])
+          ...(recordings
+            ? {
+                recordings_left:
+                  left === 0
+                    ? "That was the last recording this turn. Attach your best take and tell the user what you'd change, rather than recording again."
+                    : `${left} of ${MAX_RECORDINGS_PER_TURN} recordings left this turn. Record again only for a real fault you can see in the frame.`
+              }
+            : {}),
+          ...unplacedAssets(assets, html, ['image', 'gif', 'video'])
         }),
         image: toModel(recording.poster) ?? undefined,
         result: {

@@ -1,5 +1,9 @@
-import type { AgentProvider, AgentStatus, ClaudeCliStatus } from '@shared/api'
-import type { AgentConfig } from './config'
+import type { AgentModel, AgentProvider, AgentStatus, ClaudeCliStatus } from '@shared/api'
+import { LISTED_TTL_MS, type AgentConfig } from './config'
+import { pickerModels, type ListedModel } from './models'
+
+/** How long the settings form waits on the API's model list before showing the built-in one. */
+const LIST_TIMEOUT_MS = 5000
 
 export interface ClaudeCli {
   /** Cheap: looks for the file, runs nothing. Decides the default provider per turn. */
@@ -28,7 +32,10 @@ export class AgentSettings {
   constructor(
     private readonly config: AgentConfig,
     private readonly checkKey: (key: string) => Promise<void>,
-    private readonly claude: ClaudeCli = NO_CLI
+    private readonly claude: ClaudeCli = NO_CLI,
+    /** GET /v1/models for a key (OP-93); the built-in list is used without it. */
+    private readonly listModels: (key: string) => Promise<ListedModel[]> = async () => [],
+    private readonly now: () => number = () => Date.now()
   ) {}
 
   /** Who answers the next message: the user's pick, else the CLI when it is installed. */
@@ -38,8 +45,9 @@ export class AgentSettings {
 
   /** Shown under each reply, like "Claude Code · Opus 5". */
   via(): string {
-    const model = this.config.status().models.find((m) => m.id === this.config.model())
-    const name = (model?.label.split(',')[0] ?? this.config.model()).replace(/^Claude /, '')
+    const id = this.config.model()
+    const model = pickerModels(this.config.listed()?.models ?? null).find((m) => m.id === id)
+    const name = model ? model.label.split(',')[0]!.replace(/^Claude /, '') : id
     return `${this.provider() === 'cli' ? 'Claude Code' : 'API key'} · ${name}`
   }
 
@@ -50,6 +58,7 @@ export class AgentSettings {
     const provider = this.provider()
     return {
       ...base,
+      models: await this.models(provider),
       provider,
       providerChosen: this.config.provider() !== null,
       cli,
@@ -84,6 +93,40 @@ export class AgentSettings {
   async setSendImages(on: boolean): Promise<AgentStatus> {
     this.config.setSendImages(on)
     return this.status()
+  }
+
+  /**
+   * The picker's list: on the API path the key's own models from /v1/models, fetched at most once
+   * a day and waited on for 5 seconds; the built-in list otherwise, or when that fails. The saved
+   * model is always in it, even one typed under Other….
+   */
+  private async models(provider: AgentProvider): Promise<AgentModel[]> {
+    let listed = provider === 'api' ? this.config.listed() : null
+    const key = this.config.key()
+    if (provider === 'api' && key && (!listed || this.now() - listed.fetchedAt > LISTED_TTL_MS)) {
+      let timer: NodeJS.Timeout | undefined
+      try {
+        const models = await Promise.race([
+          this.listModels(key),
+          new Promise<never>((_, reject) => {
+            timer = setTimeout(() => reject(new Error('timed out')), LIST_TIMEOUT_MS)
+          })
+        ])
+        if (models.length > 0) {
+          this.config.setListed(models, this.now())
+          listed = this.config.listed()
+        }
+      } catch {
+        // Offline, or the API refused: the last list, else the built-in one.
+      } finally {
+        clearTimeout(timer)
+      }
+    }
+    const list = pickerModels(listed?.models ?? null)
+    const current = this.config.model()
+    return list.some((m) => m.id === current)
+      ? list
+      : [...list, { id: current, label: `${current} (typed in)` }]
   }
 
   async setModel(model: string): Promise<AgentStatus> {

@@ -1,5 +1,14 @@
-import type { AgentModel, AgentProvider, AgentStatus } from '@shared/api'
+import type { AgentProvider, AgentStatus, JsonValue } from '@shared/api'
 import type { SettingsStore } from '../db'
+import {
+  DEFAULT_MODEL,
+  PREVIOUS_DEFAULT,
+  isModelId,
+  pickerModels,
+  shapeOf,
+  type ListedModel,
+  type ModelShape
+} from './models'
 
 /**
  * Where the API key lives: OP-4's encrypted CredentialStore in the app, a map in tests.
@@ -16,14 +25,11 @@ const KEY_NAME = 'anthropic.apiKey'
 const MODEL_SETTING = 'agent.model'
 const PROVIDER_SETTING = 'agent.provider'
 const SEND_IMAGES_SETTING = 'agent.sendImages'
+const LISTED_SETTING = 'agent.listedModels'
+const ONBOARDED_SETTING = 'onboarding.completedAt'
 const PROVIDERS: AgentProvider[] = ['cli', 'api']
-
-export const AGENT_MODELS: AgentModel[] = [
-  { id: 'claude-opus-5', label: 'Claude Opus 5, best results' },
-  { id: 'claude-sonnet-5', label: 'Claude Sonnet 5, cheaper' },
-  { id: 'claude-haiku-4-5', label: 'Claude Haiku 4.5, cheapest' }
-]
-export const DEFAULT_MODEL = 'claude-opus-5'
+/** How long the API's model list is trusted before it is fetched again. */
+export const LISTED_TTL_MS = 24 * 60 * 60 * 1000
 
 /** The agent's provider settings. Only main reads the key. */
 export class AgentConfig {
@@ -39,20 +45,65 @@ export class AgentConfig {
 
   setKey(key: string): void {
     this.secrets.set(KEY_NAME, key)
+    // Another key may reach other models.
+    this.setListed(null)
   }
 
   clearKey(): void {
     if (this.secrets.isAvailable()) this.secrets.delete(KEY_NAME)
+    this.setListed(null)
   }
 
   model(): string {
     const saved = this.settings.get(MODEL_SETTING)
-    return AGENT_MODELS.some((m) => m.id === saved) ? (saved as string) : DEFAULT_MODEL
+    return isModelId(saved) ? saved : DEFAULT_MODEL
   }
 
+  /** Any model id: one from the list, or one typed under Other… for the CLI. */
   setModel(model: string): void {
-    if (!AGENT_MODELS.some((m) => m.id === model)) throw new Error(`Unknown model ${model}`)
-    this.settings.set(MODEL_SETTING, model)
+    const id = typeof model === 'string' ? model.trim() : ''
+    if (!isModelId(id))
+      throw new Error(`"${String(model)}" isn't a model id, like claude-opus-5-5.`)
+    this.settings.set(MODEL_SETTING, id)
+  }
+
+  /**
+   * Once, at startup (OP-93): an install from before the default moved to Opus 5.5 that never
+   * picked a model keeps Opus 5, the default it was using. New installs get the new default.
+   */
+  keepPreviousDefault(): void {
+    if (this.settings.get(MODEL_SETTING) !== null) return
+    const existing =
+      this.settings.get(PROVIDER_SETTING) !== null ||
+      this.settings.get(ONBOARDED_SETTING) !== null ||
+      this.key() !== null
+    if (existing) this.settings.set(MODEL_SETTING, PREVIOUS_DEFAULT)
+  }
+
+  /** What the API listed for the saved key, when it was fetched; null before the first fetch. */
+  listed(): { fetchedAt: number; models: ListedModel[] } | null {
+    const saved = this.settings.get(LISTED_SETTING) as {
+      fetchedAt?: unknown
+      models?: unknown
+    } | null
+    if (!saved || typeof saved.fetchedAt !== 'number' || !Array.isArray(saved.models)) return null
+    const models = saved.models.filter(
+      (m): m is ListedModel =>
+        typeof m === 'object' && m !== null && isModelId((m as ListedModel).id)
+    )
+    return { fetchedAt: saved.fetchedAt, models }
+  }
+
+  setListed(models: ListedModel[] | null, fetchedAt: number = Date.now()): void {
+    this.settings.set(
+      LISTED_SETTING,
+      models ? ({ fetchedAt, models } as unknown as JsonValue) : null
+    )
+  }
+
+  /** What a request to this model sends: adaptive thinking, fallbacks. */
+  shape(model: string = this.model()): ModelShape {
+    return shapeOf(model, this.listed()?.models)
   }
 
   /** The provider the user picked, or null before they pick one. */
@@ -80,7 +131,7 @@ export class AgentConfig {
       hasKey: this.key() !== null,
       canStoreKey: this.secrets.isAvailable(),
       model: this.model(),
-      models: AGENT_MODELS,
+      models: pickerModels(null),
       sendImages: this.sendImages()
     }
   }

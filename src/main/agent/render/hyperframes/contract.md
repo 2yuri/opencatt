@@ -17,7 +17,8 @@ each frame must be reproducible from its time alone: same time, same pixels.
   `data:` source.
 - The user's own files (a logo, a photo, footage) are placed as they are, never redrawn: list their
   media ids in `assets` and load each as `asset://<media id>`, in an `<img>` or a
-  `<video muted>` with `data-start` and `data-duration`, whose playback the runtime seeks.
+  `<video muted>` with `data-start` and `data-duration`, whose playback the runtime seeks. Never
+  set its `currentTime` or call `play()` yourself: the runtime and your script would fight.
 - Videos are silent: no `<audio>`, and no `<video>` other than the user's own footage.
 
 ## The skeleton

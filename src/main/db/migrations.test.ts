@@ -14,6 +14,7 @@ describe('migrations', () => {
     expect(tables).toEqual([
       'accounts',
       'chat_messages',
+      'chat_sessions',
       'post_media',
       'post_parts',
       'posts',

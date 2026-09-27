@@ -1,6 +1,6 @@
 import Anthropic from '@anthropic-ai/sdk'
 import { describe, expect, it } from 'vitest'
-import type { AgentEvent, ChatMessage } from '@shared/api'
+import type { AgentEvent, ChatMessage, PostMedia } from '@shared/api'
 import { ChatStore, PostsService, SettingsStore } from '../db'
 import { openDatabase } from '../db/database'
 import { AnthropicRunner, historyFor, type ModelClient } from './anthropic'
@@ -43,6 +43,7 @@ function fakeClient(script: (Message | Error)[]): ModelClient & { requests: Para
   return {
     requests,
     check: async () => {},
+    models: async () => [],
     stream(params, { signal }) {
       requests.push(structuredClone(params))
       const next = script.shift()
@@ -110,7 +111,7 @@ describe('AnthropicRunner', () => {
       ['assistant', 'Hi there']
     ])
     const req = client.requests[0]!
-    expect(req.model).toBe('claude-opus-5')
+    expect(req.model).toBe('claude-opus-5-5')
     expect(req.tools?.map((t) => ('name' in t ? t.name : ''))).toEqual([
       'create_posts',
       'list_posts',
@@ -120,8 +121,7 @@ describe('AnthropicRunner', () => {
     ])
     expect(JSON.stringify(req.system)).toContain("The user's time zone is Europe/Lisbon")
     expect(req.thinking).toEqual({ type: 'adaptive' })
-    expect(req.fallbacks).toBe('default')
-    expect(req.betas).toEqual(['server-side-fallback-2026-07-01'])
+    expect(req.fallbacks).toBeUndefined()
     expect(req.messages).toEqual([
       {
         role: 'user',
@@ -300,7 +300,8 @@ describe('historyFor', () => {
     media: [],
     accountId: null,
     mode: 'text',
-    preface: null
+    preface: null,
+    sessionId: null
   })
 
   it('tells the model which media ids a user message carries', () => {
@@ -398,6 +399,15 @@ describe('historyFor', () => {
     expect(JSON.stringify(text.content)).not.toContain('Mode:')
   })
 
+  it('names each attached file to place as it is in Image and Video mode (OP-89)', async () => {
+    const { modeNote } = await import('./prompt')
+    const logo = { id: 'm1', kind: 'image' } as PostMedia
+    const clip = { id: 'v1', kind: 'video' } as PostMedia
+    const note = modeNote({ ...at('user', 'Launch'), mode: 'video', media: [logo, clip] })
+    expect(note).toContain('never redrawn: <img src="asset://m1">, <video src="asset://v1">.')
+    expect(modeNote({ ...at('user', 'Launch'), mode: 'image' })).not.toContain('asset://')
+  })
+
   it('sends a preface and the user text as one message, preface first', () => {
     const [turn] = historyFor([
       { ...at('user', 'our 1.0 launch'), mode: 'video', preface: 'make a dynamic 15-second video.' }
@@ -465,9 +475,16 @@ describe('request prefix across turns', () => {
     expect(JSON.stringify(b!.messages[0])).toBe(JSON.stringify(a!.messages[0]))
   })
 
-  it('sends fallbacks only to Opus 5, and adaptive thinking to Opus 5 and Sonnet 5', async () => {
+  it('sends what the model table says: fallbacks to Opus 5, adaptive thinking where it applies', async () => {
     const seen: Record<string, [unknown, unknown, unknown]> = {}
-    for (const model of ['claude-opus-5', 'claude-sonnet-5', 'claude-haiku-4-5']) {
+    const models = [
+      'claude-opus-5-5',
+      'claude-fable-5-1',
+      'claude-opus-5',
+      'claude-sonnet-5',
+      'claude-haiku-4-5'
+    ]
+    for (const model of models) {
       const { client, config, session } = setup([message([text('ok')])])
       config.setModel(model)
       session.send('Hi')
@@ -476,6 +493,9 @@ describe('request prefix across turns', () => {
       seen[model] = [req.thinking, req.fallbacks, req.betas]
     }
     expect(seen).toEqual({
+      'claude-opus-5-5': [{ type: 'adaptive' }, undefined, undefined],
+      // Fable 5.1 always thinks and takes no thinking field.
+      'claude-fable-5-1': [undefined, undefined, undefined],
       'claude-opus-5': [{ type: 'adaptive' }, 'default', ['server-side-fallback-2026-07-01']],
       'claude-sonnet-5': [{ type: 'adaptive' }, undefined, undefined],
       'claude-haiku-4-5': [undefined, undefined, undefined]
@@ -511,6 +531,7 @@ describe('writing guide and voice (OP-74)', () => {
           images: 'never'
         }
       },
+      sessionId: 'chat',
       writing: 'Write like a pirate.',
       signal: new AbortController().signal,
       text: () => {},

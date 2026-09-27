@@ -24,6 +24,11 @@ export const IpcChannel = {
   SettingsSet: 'settings:set',
   ChatList: 'chat:list',
   ChatClear: 'chat:clear',
+  ChatSessionsList: 'chat:sessions:list',
+  ChatSessionsCreate: 'chat:sessions:create',
+  ChatSessionsRename: 'chat:sessions:rename',
+  ChatSessionsDelete: 'chat:sessions:delete',
+  ChatSessionsSetActive: 'chat:sessions:setActive',
   AgentSend: 'agent:send',
   AgentCapabilities: 'agent:capabilities',
   VideoPrePromptGet: 'video:prePrompt:get',
@@ -73,6 +78,8 @@ export const IpcEvent = {
   MediaProgress: 'media:progress',
   /** An X account was connected, disconnected, switched to or needs signing in again. */
   AuthChanged: 'auth:changed',
+  /** An account's chats changed: made, renamed, deleted, switched or given a title (OP-94). */
+  ChatSessionsChanged: 'chat:sessions:changed',
   /** An account's voice was saved: { accountId, profile }. */
   VoiceChanged: 'voice:changed'
 } as const
@@ -287,6 +294,42 @@ export interface ChatMessage {
   mode: ComposerMode
   /** Sent before the user's text, like Video mode's showreel pre-prompt (OP-81). */
   preface: string | null
+  /** The chat it belongs to (OP-94). */
+  sessionId: string | null
+}
+
+/** One of an account's chats with the agent (OP-94). */
+export interface ChatSession {
+  id: string
+  /** Null for the chat from before any account was connected. */
+  accountId: string | null
+  /** "New chat" until the first message names it, or the user renames it. */
+  title: string
+  createdAt: string
+  /** When a message was last saved in it; lists are newest first. */
+  updatedAt: string
+  archived: boolean
+  /** The account's open chat, which chat.list() and the composer use. */
+  active: boolean
+  /** The agent is answering in it right now. */
+  streaming: boolean
+}
+
+export interface ChatSessionsChanged {
+  accountId: string | null
+}
+
+export interface ChatSessionsApi {
+  /** An account's chats, newest first; the active account's when left out. */
+  list(accountId?: string | null): Promise<ChatSession[]>
+  /** A new, empty chat that becomes the active one; on the active account when left out. */
+  create(accountId?: string | null): Promise<ChatSession>
+  /** Rejects an empty name, or one over 80 characters, with a plain message. */
+  rename(id: string, title: string): Promise<ChatSession>
+  /** Deletes the chat and its messages; the last one on an account is replaced by a new chat. */
+  delete(id: string): Promise<void>
+  setActive(id: string): Promise<ChatSession>
+  onChanged(listener: (event: ChatSessionsChanged) => void): () => void
 }
 
 /** The composer's mode buttons: write a post, or a post with an image or a video made for it. */
@@ -302,6 +345,7 @@ export interface NewChatMessage {
   accountId?: string | null
   mode?: ComposerMode
   preface?: string | null
+  sessionId?: string | null
 }
 
 /** Video mode's pre-prompt (OP-81), edited in Settings, Voice, Advanced (OP-75). */
@@ -326,9 +370,11 @@ export interface AgentCapabilities {
 
 /** Read-only apart from clear: the agent session is the only writer of the history. */
 export interface ChatApi {
+  /** The active chat of the active account. */
   list(): Promise<ChatMessage[]>
-  /** Empties the history. Rejects while the agent is answering. */
+  /** Empties the active chat. Rejects while the agent is answering. */
   clear(): Promise<void>
+  sessions: ChatSessionsApi
 }
 
 // The agent. Main owns the conversation: it saves every message to the chat
@@ -383,11 +429,15 @@ export type AgentEvent =
   ) & {
     /** The account whose conversation the turn is in; the chat shows only the active one's. */
     accountId: string | null
+    /** The chat the turn is in (OP-94); the panel shows only the active chat's. */
+    sessionId: string | null
   }
 
 export interface AgentTurnStarted {
   turnId: string
   accountId: string | null
+  /** The chat the turn answers in, kept even if the user switches chats mid-turn (OP-94). */
+  sessionId: string | null
 }
 
 export interface AgentModel {

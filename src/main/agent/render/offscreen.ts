@@ -1,5 +1,6 @@
 import { BrowserWindow, session, type NativeImage } from 'electron'
-import { NO_ASSETS, renderRequestAllowed, serveAssets, type RenderAssets } from './assets'
+import { serveAssets } from './assetProtocol'
+import { NO_ASSETS, renderRequestAllowed, type RenderAssets } from './assets'
 import { RenderError, type HtmlRenderer, type RenderSize } from './tool'
 
 /** Past this the render is given up and the model is told to simplify. */

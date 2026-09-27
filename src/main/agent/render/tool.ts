@@ -128,7 +128,7 @@ export function renderImageTool(
           note:
             'Rendered and shown to the user in the chat. Attach it with create_posts or ' +
             'update_post media [{ "id": media_id, "alt": "..." }].',
-          ...unplacedAssets(assets, files, ['image', 'gif'])
+          ...unplacedAssets(assets, html, ['image', 'gif'])
         }),
         image: toModel(saved) ?? undefined,
         result: {

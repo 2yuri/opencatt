@@ -37,7 +37,7 @@ const KILL_GRACE_MS = 1000
 /** Codes the CLI puts on an assistant message when the login is the problem. */
 const LOGIN_ERRORS = new Set(['authentication_failed', 'oauth_token_revoked', 'invalid_api_key'])
 
-interface CliSession {
+export interface CliSession {
   id: string
   /** The last user message this session has answered; gone from the chat means start fresh. */
   answered: string
@@ -56,6 +56,14 @@ export interface ClaudeCliOptions {
   spawn?: (command: string, args: string[], options: SpawnOptions) => ChildProcess
   /** Attached images for the model; none when unset. */
   images?: ImageLoader
+  /**
+   * The Claude Code session each chat is in (OP-94), so chats never share a context. Without it
+   * the session is kept per account in settings, as before chats.
+   */
+  chats?: {
+    cli(chatId: string): CliSession | null
+    setCli(chatId: string, session: CliSession): void
+  }
 }
 
 /** The flags that keep the CLI to OpenCatt's tools. Exported so a test can pin them. */
@@ -153,7 +161,9 @@ export class ClaudeCliRunner implements AgentRunner {
     if (!lastUser) throw new AgentError('other', 'There is no message to answer.')
     const retrying = turn.history.at(-1) !== lastUser
 
-    const saved = this.session(turn.account?.id ?? null)
+    const saved = this.o.chats
+      ? this.o.chats.cli(turn.sessionId)
+      : this.session(turn.account?.id ?? null)
     const known = saved && turn.history.some((m) => m.id === saved.answered) ? saved : null
     try {
       await this.once(turn, found, lastUser, known, retrying)
@@ -270,7 +280,9 @@ export class ClaudeCliRunner implements AgentRunner {
         }
         throw new AgentError('api', text)
       }
-      this.saveSession(turn.account?.id ?? null, { id: sessionId, answered: lastUser.id })
+      const session = { id: sessionId, answered: lastUser.id }
+      if (this.o.chats) this.o.chats.setCli(turn.sessionId, session)
+      else this.saveSession(turn.account?.id ?? null, session)
     } finally {
       stopListening()
       turn.signal.removeEventListener('abort', onAbort)

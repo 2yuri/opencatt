@@ -177,8 +177,8 @@ and does nothing.
 The public repo, 2yuri/opencatt, gets main's files without the private history:
 `scripts/publish-public.sh` checks the files (no keys or env files, no secrets, no local paths),
 then adds one snapshot commit and mirrors the ffmpeg release there if it's missing. It only
-pushes with `--push`. The snapshot commit's author is the GitHub account `gh` is logged in as,
-through its noreply address, so run it logged in as the repo owner.
+pushes with `--push`. Every public commit is authored as the repo owner, yuri
+<hello@yuri.dev>, whoever runs it.
 
 Signing: macOS builds are ad-hoc signed (`identity: '-'`), which Apple Silicon needs to run them
 at all, and Windows builds are unsigned. With an Apple Developer ID, set it as `identity`, turn

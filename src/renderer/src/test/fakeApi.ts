@@ -20,7 +20,7 @@ import { singlePart } from './parts'
 
 type AgentEventInput = AgentEvent extends infer E
   ? E extends AgentEvent
-    ? Omit<E, 'accountId'> & { accountId?: string | null }
+    ? Omit<E, 'accountId' | 'sessionId'> & { accountId?: string | null; sessionId?: string | null }
     : never
   : never
 
@@ -110,7 +110,8 @@ export function chatMessage(role: ChatMessage['role'], content: string): ChatMes
     media: [],
     accountId: null,
     mode: 'text',
-    preface: null
+    preface: null,
+    sessionId: null
   }
 }
 
@@ -284,7 +285,15 @@ export function fakeApi(history: ChatMessage[] = []): FakeApi {
     },
     chat: {
       list: vi.fn(() => Promise.resolve(history)),
-      clear: vi.fn(() => Promise.resolve())
+      clear: vi.fn(() => Promise.resolve()),
+      sessions: {
+        list: vi.fn(() => Promise.resolve([])),
+        create: vi.fn(() => Promise.reject(new Error('not faked'))),
+        rename: vi.fn(() => Promise.reject(new Error('not faked'))),
+        delete: vi.fn(() => Promise.resolve()),
+        setActive: vi.fn(() => Promise.reject(new Error('not faked'))),
+        onChanged: vi.fn(() => () => {})
+      }
     },
     agent: {
       send: vi.fn(() => Promise.resolve({ turnId: 't1' })),
@@ -381,7 +390,10 @@ export function fakeApi(history: ChatMessage[] = []): FakeApi {
     voices,
     voiceChanged,
     prompts,
-    emit: (event) => agentListeners.forEach((l) => l({ accountId: null, ...event } as AgentEvent)),
+    emit: (event) =>
+      agentListeners.forEach((l) =>
+        l({ accountId: null, sessionId: null, ...event } as AgentEvent)
+      ),
     changed: (event) => postListeners.forEach((l) => l(event)),
     progress: (event) => progressListeners.forEach((l) => l(event))
   }

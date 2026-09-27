@@ -48,6 +48,32 @@ describe('agent settings in the chat panel', () => {
     expect(await screen.findByLabelText('Anthropic API key')).toBeTruthy()
   })
 
+  it('takes a typed model id under Other… on the CLI path only (OP-93)', async () => {
+    const fake = fakeApi([])
+    fake.agentStatus.provider = 'cli'
+    fake.agentStatus.cli = { ...fake.agentStatus.cli, found: true, loggedIn: true }
+    window.opencat = fake.api
+    render(<ChatPanel />)
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Settings' }))
+    const select = (await screen.findByLabelText('Model')) as HTMLSelectElement
+    fireEvent.change(select, { target: { value: '__other__' } })
+    const input = await screen.findByLabelText('Model id')
+    fireEvent.change(input, { target: { value: 'claude-opus-6' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Use' }))
+    await waitFor(() => expect(fake.api.agent.setModel).toHaveBeenCalledWith('claude-opus-6'))
+    await waitFor(() => expect(screen.queryByLabelText('Model id')).toBeNull())
+  })
+
+  it('offers no Other… on the API path, where the list comes from the key', async () => {
+    const fake = fakeApi([])
+    window.opencat = fake.api
+    render(<ChatPanel />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Settings' }))
+    const select = (await screen.findByLabelText('Model')) as HTMLSelectElement
+    expect([...select.options].map((o) => o.value)).not.toContain('__other__')
+  })
+
   it('explains a missing keyring instead of offering a key field', async () => {
     const fake = fakeApi([])
     Object.assign(fake.agentStatus, { hasKey: false, canStoreKey: false })
