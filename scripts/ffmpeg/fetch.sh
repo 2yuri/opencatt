@@ -22,6 +22,9 @@ if [ $# -eq 0 ]; then
 elif [ "$1" = all ]; then
   set -- "${ALL[@]}"
 fi
+# Git Bash on Windows has sha256sum but no shasum; macOS has shasum only.
+if command -v sha256sum >/dev/null; then sha256=(sha256sum); else sha256=(shasum -a 256); fi
+
 for target in "$@"; do
   archive="ffmpeg-8.1.3-lgpl-$target.tar.gz"
   tmp=$(mktemp -d)
@@ -37,7 +40,7 @@ for target in "$@"; do
     [ -n "$url" ] || { echo "Can't find $archive in $RELEASE_REPO@$RELEASE_TAG (private repo? set GITHUB_TOKEN)"; exit 1; }
     curl -fsSL ${auth[@]+"${auth[@]}"} -H "Accept: application/octet-stream" "$url" -o "$tmp/$archive"
   fi
-  (cd "$tmp" && grep " $archive\$" "$OLDPWD/scripts/ffmpeg/checksums.sha256" | shasum -a 256 -c -)
+  (cd "$tmp" && grep " $archive\$" "$OLDPWD/scripts/ffmpeg/checksums.sha256" | "${sha256[@]}" -c -)
   rm -rf "vendor/ffmpeg/$target" && mkdir -p "vendor/ffmpeg/$target"
   tar -xzf "$tmp/$archive" -C "vendor/ffmpeg/$target"
   rm -rf "$tmp"

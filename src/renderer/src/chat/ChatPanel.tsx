@@ -261,6 +261,8 @@ function Conversation({
     busyAccount !== authStatus.activeAccountId
       ? (authStatus.accounts.find((a) => a.id === busyAccount)?.handle ?? null)
       : undefined
+  // Why Open it couldn't switch to the answering chat, cleared on the next try (OP-96).
+  const [openError, setOpenError] = useState<string | null>(null)
   const [menuOpen, setMenuOpen] = useState(false)
   const titleRef = useRef<HTMLButtonElement>(null)
   const rootRef = useRef<HTMLDivElement>(null)
@@ -590,16 +592,22 @@ function Conversation({
                     if (!turn || turn.accountId === null) return
                     // Switch account first, so its chats become the list, then open the answering one.
                     const sessionId = turn.sessionId
+                    setOpenError(null)
                     void window.opencat.auth
                       .setActive(turn.accountId)
                       .then(() =>
                         sessionId ? window.opencat.chat.sessions.setActive(sessionId) : null
                       )
-                      .catch(() => undefined)
+                      .catch((err: unknown) => setOpenError(messageOf(err)))
                   }}
                 >
                   Open it
                 </button>
+                {openError && (
+                  <span className="block text-ds-red" role="alert">
+                    {openError}
+                  </span>
+                )}
               </>
             ) : notice ? (
               <span className="text-ds-red">{notice}</span>

@@ -278,6 +278,24 @@ describe('ChatPanel chats (OP-95)', () => {
     await waitFor(() => expect(send().disabled).toBe(false))
   })
 
+  it("says why Open it couldn't switch to the other account's chat", async () => {
+    const fake = setup()
+    fake.sessions.find((s) => s.id === 'b1')!.streaming = true
+    vi.mocked(fake.api.auth.setActive).mockRejectedValueOnce(
+      new Error("Error invoking remote method 'auth:setActive': Error: That account is gone")
+    )
+    render(<ChatPanel />)
+    await titleButton('Launch week ideas')
+    const note = await screen.findByText(/The agent is answering for @beta/)
+    fireEvent.click(within(note).getByRole('button', { name: 'Open it' }))
+    expect((await screen.findByRole('alert')).textContent).toBe('That account is gone')
+    expect(fake.api.chat.sessions.setActive).not.toHaveBeenCalled()
+    // The next try clears it.
+    fireEvent.click(within(note).getByRole('button', { name: 'Open it' }))
+    await waitFor(() => expect(screen.queryByRole('alert')).toBeNull())
+    await waitFor(() => expect(fake.api.chat.sessions.setActive).toHaveBeenCalledWith('b1'))
+  })
+
   it('renames a chat in place: Enter saves, Escape keeps the name, a refusal shows under it', async () => {
     const fake = setup()
     render(<ChatPanel />)
