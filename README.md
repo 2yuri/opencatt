@@ -10,25 +10,25 @@
 <p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-7c6cf6" alt="MIT license"></a>
   <img src="https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-3b3b4f" alt="Windows, macOS and Linux">
-  <img src="https://img.shields.io/badge/status-early%20development-f5a524" alt="Early development">
+  <a href="https://github.com/2yuri/opencatt/releases/latest"><img src="https://img.shields.io/github/v/release/2yuri/opencatt?color=f5a524" alt="Latest release"></a>
 </p>
 
 OpenCatt is an open source desktop app that keeps your X posts on a calendar and gives you an AI
-agent to write them with. The agent runs through your own Claude Code, so there is
-no API key to buy, and nothing it writes goes out until you approve it. Your posts, drafts and
-chat live in a SQLite file on your machine, and your X keys stay in the OS keychain.
+agent to write them with. The agent runs through your own Claude Code, on the Claude plan you
+already have, or with an Anthropic API key, and nothing it writes goes out until you approve it.
+OpenCatt then publishes to X at the scheduled time. Your posts, drafts and chat live in a SQLite
+file on your machine, and your X keys stay in the OS keychain.
 
-> OpenCatt is in early development. The calendar, the Approvals page and the agent panel shown
-> here work today. X login, the background publisher, the day board redesign and the new onboarding
-> are still being built.
+The first release, [v0.1.0](https://github.com/2yuri/opencatt/releases/tag/v0.1.0), is out for
+macOS, Windows and Linux.
 
 ## A calendar for your next idea
 
 <img src="docs/images/calendar.png" alt="The OpenCatt calendar with scheduled posts and the agent panel" width="100%">
 
 Every day on the calendar shows what is scheduled, waiting for approval and already posted. Open
-a day to write, edit, reschedule or delete posts, with single posts, threads of up to 25 parts
-and images.
+a day to write, edit, reschedule or delete posts, with single posts, threads of up to 25 parts,
+images and videos.
 
 ## Your agent drafts. You decide.
 
@@ -41,11 +41,24 @@ Outside agents can do the same through OpenCatt's MCP server, and their posts wa
 ## Features
 
 - Calendar with day boards for scheduled, pending and posted posts
-- Chat agent through the local `claude` CLI, on your existing Claude plan
+- Chat agent through the local `claude` CLI on your existing Claude plan, or an Anthropic API key
+- Text, Image and Video modes: the agent writes posts and designs images and short videos for them
 - Approval step for every post an agent writes, in the app or over MCP
-- Threads and image attachments, and soon images the agent designs for you
+- Publishing on schedule, with retries, and videos that X is still processing don't hold up the rest
+- Several X accounts with a switcher, each with its own posts, chats and writing voice
+- Integrations screen to set up the MCP server for other tools and see your connected accounts
+- Threads, pasted images and files, and a full-size viewer for images and videos
 - Your own X developer app, set up with a step-by-step guide on first run
+- Starts at login in the tray if you want, so posts go out while the window is closed
 - Local SQLite storage, secrets in the OS keychain through Electron's `safeStorage`
+
+## Requirements
+
+- macOS 12 or later (Apple Silicon or Intel), Windows 10 or 11 (64-bit), or 64-bit Linux
+- For the agent, [Claude Code](https://claude.com/claude-code) installed and logged in, or an
+  Anthropic API key
+- Your own X developer app on a plan that can post. X charges for API use; see
+  [X's pricing](https://docs.x.com/x-api/getting-started/pricing)
 
 ## Install
 
@@ -105,8 +118,9 @@ pnpm build      # typecheck + production build into out/
 
 ### Layout
 
-- `src/main` is the Electron main process: windows, IPC handlers, and later the database and the X
-  client.
+- `src/main` is the Electron main process: windows and IPC handlers, the database (`db`), the X
+  client (`x`) and login (`auth`), the publisher, the agent (`agent`), the MCP server (`mcp`) and
+  media processing with ffmpeg (`media`).
 - `src/preload` exposes the typed `window.opencat` API to the renderer through `contextBridge`.
 - `src/renderer` is the React UI. It has no Node access and talks to main only through
   `window.opencat`.
