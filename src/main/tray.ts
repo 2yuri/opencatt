@@ -33,3 +33,19 @@ export function tellAboutTrayOnce(settings: SettingsStore): void {
     body: `It stays in the ${where} so your posts go out on time. Quit it from the ${where} icon.`
   }).show()
 }
+
+/**
+ * What closing the last window does while OpenCatt keeps running (OP-10, OP-107): say once that
+ * it's still there, and on macOS leave the Dock and Cmd-Tab, living only in the menu bar.
+ * showWindow() brings the Dock icon back with the window. Nothing happens while quitting.
+ */
+export function onLastWindowClosed(o: {
+  quitting: boolean
+  platform: NodeJS.Platform
+  tellOnce: () => void
+  hideDock: () => void
+}): void {
+  if (o.quitting) return
+  o.tellOnce()
+  if (o.platform === 'darwin') o.hideDock()
+}

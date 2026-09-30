@@ -89,6 +89,29 @@ const api: OpenCatApi = {
     setPrePrompt: (text) => ipcRenderer.invoke(IpcChannel.VideoPrePromptSet, text),
     resetPrePrompt: () => ipcRenderer.invoke(IpcChannel.VideoPrePromptReset)
   },
+  stats: {
+    estimate: () => ipcRenderer.invoke(IpcChannel.StatsEstimate),
+    sync: () => ipcRenderer.invoke(IpcChannel.StatsSync),
+    list: () => ipcRenderer.invoke(IpcChannel.StatsList),
+    totals: () => ipcRenderer.invoke(IpcChannel.StatsTotals),
+    lastSync: () => ipcRenderer.invoke(IpcChannel.StatsLastSync),
+    history: () => ipcRenderer.invoke(IpcChannel.StatsHistory),
+    filter: {
+      get: () => ipcRenderer.invoke(IpcChannel.StatsFilterGet),
+      set: (filter) => ipcRenderer.invoke(IpcChannel.StatsFilterSet, filter)
+    },
+    onChanged: (listener) => {
+      const handler = (_e: IpcRendererEvent, event: { accountId: string | null }): void =>
+        listener(event)
+      ipcRenderer.on(IpcEvent.StatsChanged, handler)
+      return () => ipcRenderer.off(IpcEvent.StatsChanged, handler)
+    },
+    prices: {
+      get: () => ipcRenderer.invoke(IpcChannel.StatsPricesGet),
+      set: (prices) => ipcRenderer.invoke(IpcChannel.StatsPricesSet, prices),
+      reset: () => ipcRenderer.invoke(IpcChannel.StatsPricesReset)
+    }
+  },
   autopilot: {
     get: (accountId) => ipcRenderer.invoke(IpcChannel.AutopilotGet, accountId),
     set: (accountId, on) => ipcRenderer.invoke(IpcChannel.AutopilotSet, accountId, on),

@@ -266,7 +266,12 @@ describe('Autopilot in Settings and Integrations (OP-104)', () => {
       )
     ).toBeTruthy()
     const headings = screen.getAllByRole('heading', { level: 2 }).map((h) => h.textContent)
-    expect(headings.slice(headings.indexOf('Accounts'))).toEqual(['Accounts', 'Posting', 'Agent'])
+    expect(headings.slice(headings.indexOf('Accounts'))).toEqual([
+      'Accounts',
+      'Posting',
+      'X prices',
+      'Agent'
+    ])
 
     const sw = await waitFor(() => {
       const found = within(section).getByRole<HTMLButtonElement>('switch', { name: 'Autopilot' })

@@ -62,7 +62,7 @@ describe('Settings, Voice', () => {
     await waitFor(() => expect(description().value).toBe('Short, plain and a bit dry.'))
     expect(fake.api.voice.get).toHaveBeenCalledWith('acme')
     const headings = screen.getAllByRole('heading', { level: 2 }).map((h) => h.textContent)
-    expect(headings).toEqual(['General', 'Voice', 'Accounts', 'Posting', 'Agent'])
+    expect(headings).toEqual(['General', 'Voice', 'Accounts', 'Posting', 'X prices', 'Agent'])
     expect(screen.getByText('We shipped the calendar today.')).toBeTruthy()
     expect(screen.getByLabelText<HTMLSelectElement>('Language').value).toBe('auto')
     expect(screen.getByRole('switch', { name: 'Emoji' }).getAttribute('aria-checked')).toBe('false')

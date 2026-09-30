@@ -36,6 +36,19 @@ export interface XAccountAuth {
   forceRefresh(accountId: string): Promise<XCredentials>
 }
 
+/** One of the account's own posts as the timeline returns it, with its public stats (OP-109). */
+export interface TimelinePost {
+  id: string
+  text: string
+  createdAt: string
+  impressions: number
+  likes: number
+  reposts: number
+  replies: number
+  quotes: number
+  bookmarks: number
+}
+
 export interface PublishedPart {
   remoteId: string
   remoteUrl: string
@@ -212,6 +225,47 @@ export class XClient {
     }
     if (!head) throw new Error(`Post ${post.id} has no parts`)
     return head
+  }
+
+  /**
+   * The account's latest posts with their stats, one page of up to `max` (OP-109). Reading your
+   * own timeline is X's "owned reads", its cheapest read. Reposts are left out: they are other
+   * people's posts, and each one returned would still be charged.
+   */
+  async readTimeline(accountId: string, max = 100): Promise<TimelinePost[]> {
+    const params = new URLSearchParams({
+      max_results: String(Math.min(100, Math.max(5, max))),
+      exclude: 'retweets',
+      'tweet.fields': 'public_metrics,created_at'
+    })
+    const url = `${X_API}/2/users/${encodeURIComponent(accountId)}/tweets?${params}`
+    const res = await this.request(accountId, 'GET', url, undefined)
+    const json = (await res.json().catch(() => null)) as {
+      data?: {
+        id?: string
+        text?: string
+        created_at?: string
+        public_metrics?: Record<string, number | undefined>
+      }[]
+    } | null
+    const n = (value: number | undefined): number => (typeof value === 'number' ? value : 0)
+    return (json?.data ?? []).flatMap((post) => {
+      if (!post.id) return []
+      const m = post.public_metrics ?? {}
+      return [
+        {
+          id: post.id,
+          text: post.text ?? '',
+          createdAt: post.created_at ?? this.now().toISOString(),
+          impressions: n(m['impression_count']),
+          likes: n(m['like_count']),
+          reposts: n(m['retweet_count']),
+          replies: n(m['reply_count']),
+          quotes: n(m['quote_count']),
+          bookmarks: n(m['bookmark_count'])
+        }
+      ]
+    })
   }
 
   /** What X would refuse, before anything is uploaded; returns the file's path. */

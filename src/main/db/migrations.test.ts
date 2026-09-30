@@ -17,8 +17,11 @@ describe('migrations', () => {
       'chat_sessions',
       'post_media',
       'post_parts',
+      'post_stats',
+      'post_stats_history',
       'posts',
       'settings',
+      'x_costs',
       'x_media'
     ])
   })

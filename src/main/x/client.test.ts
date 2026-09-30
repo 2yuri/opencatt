@@ -506,3 +506,56 @@ describe('XClient video (OP-18, OP-70)', () => {
     await expect(t.client.publish(thePost, t.onPart)).rejects.toMatchObject({ kind: 'retryable' })
   })
 })
+
+describe('XClient.readTimeline (OP-109)', () => {
+  it("reads the account's last posts with their public stats, reposts left out", async () => {
+    const calls: string[] = []
+    const client = new XClient({
+      auth: {
+        credentialsFor: async () => ({ mode: 'oauth2', accessToken: 't' }) as never,
+        forceRefresh: async () => ({ mode: 'oauth2', accessToken: 't' }) as never
+      },
+      mediaPath: () => '',
+      fetch: (async (url: string) => {
+        calls.push(url)
+        return new Response(
+          JSON.stringify({
+            data: [
+              {
+                id: '9',
+                text: 'hi',
+                created_at: '2026-09-29T10:00:00.000Z',
+                public_metrics: {
+                  impression_count: 120,
+                  like_count: 4,
+                  retweet_count: 1,
+                  reply_count: 2,
+                  quote_count: 0,
+                  bookmark_count: 3
+                }
+              }
+            ]
+          }),
+          { status: 200 }
+        )
+      }) as never
+    })
+    expect(await client.readTimeline('123', 100)).toEqual([
+      {
+        id: '9',
+        text: 'hi',
+        createdAt: '2026-09-29T10:00:00.000Z',
+        impressions: 120,
+        likes: 4,
+        reposts: 1,
+        replies: 2,
+        quotes: 0,
+        bookmarks: 3
+      }
+    ])
+    const url = new URL(calls[0]!)
+    expect(url.pathname).toBe('/2/users/123/tweets')
+    expect(url.searchParams.get('max_results')).toBe('100')
+    expect(url.searchParams.get('exclude')).toBe('retweets')
+  })
+})

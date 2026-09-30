@@ -255,6 +255,55 @@ export const migrations: string[] = [
   // 16: the post was scheduled by Autopilot (OP-103), not approved by the user, so cards can say so.
   `
   ALTER TABLE posts ADD COLUMN autopilot INTEGER NOT NULL DEFAULT 0;
+  `,
+  // 17: stats read back from X on demand, the latest per X post and a snapshot per refresh for
+  // charts (OP-109), and what calls to X
+  // cost. Each cost row keeps the unit price it was charged at, so editing prices never changes
+  // past spend. A sync's rows share its sync_id; posting rows are one per X post.
+  `
+  CREATE TABLE post_stats (
+    remote_id TEXT PRIMARY KEY,
+    account_id TEXT NOT NULL,
+    post_id TEXT,
+    text TEXT NOT NULL,
+    posted_at TEXT NOT NULL,
+    impressions INTEGER NOT NULL DEFAULT 0,
+    likes INTEGER NOT NULL DEFAULT 0,
+    reposts INTEGER NOT NULL DEFAULT 0,
+    replies INTEGER NOT NULL DEFAULT 0,
+    quotes INTEGER NOT NULL DEFAULT 0,
+    bookmarks INTEGER NOT NULL DEFAULT 0,
+    synced_at TEXT NOT NULL
+  );
+  CREATE INDEX post_stats_account ON post_stats (account_id, posted_at);
+  CREATE TABLE post_stats_history (
+    sync_id TEXT NOT NULL,
+    remote_id TEXT NOT NULL,
+    account_id TEXT NOT NULL,
+    at TEXT NOT NULL,
+    impressions INTEGER NOT NULL DEFAULT 0,
+    likes INTEGER NOT NULL DEFAULT 0,
+    reposts INTEGER NOT NULL DEFAULT 0,
+    replies INTEGER NOT NULL DEFAULT 0,
+    quotes INTEGER NOT NULL DEFAULT 0,
+    bookmarks INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (sync_id, remote_id)
+  );
+  CREATE INDEX post_stats_history_account ON post_stats_history (account_id, at);
+  CREATE TABLE x_costs (
+    id TEXT PRIMARY KEY,
+    account_id TEXT,
+    kind TEXT NOT NULL CHECK (kind IN ('read', 'post', 'post_link')),
+    remote_id TEXT,
+    post_id TEXT,
+    sync_id TEXT,
+    unit_price REAL NOT NULL,
+    dollars REAL NOT NULL,
+    estimated INTEGER NOT NULL DEFAULT 0,
+    at TEXT NOT NULL
+  );
+  CREATE INDEX x_costs_remote ON x_costs (remote_id);
+  CREATE INDEX x_costs_sync ON x_costs (sync_id);
   `
 ]
 

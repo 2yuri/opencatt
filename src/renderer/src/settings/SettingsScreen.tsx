@@ -9,6 +9,7 @@ import { useActiveAccount } from '../shell/useActiveAccount'
 import { Switch } from '../ui'
 import { BOX, HEADING, LINK, SECTION, messageOf } from './common'
 import { Row, Select } from './parts'
+import { PricesSection } from './PricesSection'
 import { VoiceSection } from './VoiceSection'
 
 /**
@@ -51,6 +52,7 @@ export function SettingsScreen(): React.JSX.Element {
           />
         </Section>
         <PostingSection voiceLoaded={voiceLoaded} />
+        <PricesSection />
         <Section title="Agent">
           <Row
             title="Agent and model"

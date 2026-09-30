@@ -31,6 +31,17 @@ export const IpcChannel = {
   ChatSessionsSetActive: 'chat:sessions:setActive',
   AutopilotGet: 'autopilot:get',
   AutopilotSet: 'autopilot:set',
+  StatsEstimate: 'stats:estimate',
+  StatsSync: 'stats:sync',
+  StatsList: 'stats:list',
+  StatsTotals: 'stats:totals',
+  StatsLastSync: 'stats:lastSync',
+  StatsHistory: 'stats:history',
+  StatsPricesGet: 'stats:prices:get',
+  StatsPricesSet: 'stats:prices:set',
+  StatsPricesReset: 'stats:prices:reset',
+  StatsFilterGet: 'stats:filter:get',
+  StatsFilterSet: 'stats:filter:set',
   AgentSend: 'agent:send',
   AgentCapabilities: 'agent:capabilities',
   VideoPrePromptGet: 'video:prePrompt:get',
@@ -85,6 +96,8 @@ export const IpcEvent = {
   ChatSessionsChanged: 'chat:sessions:changed',
   /** An account's Autopilot was turned on or off: { accountId, on } (OP-103). */
   AutopilotChanged: 'autopilot:changed',
+  /** Stats or costs changed: { accountId } (OP-109). */
+  StatsChanged: 'stats:changed',
   /** An account's voice was saved: { accountId, profile }. */
   VoiceChanged: 'voice:changed'
 } as const
@@ -320,6 +333,105 @@ export interface ChatSession {
   active: boolean
   /** The agent is answering in it right now. */
   streaming: boolean
+}
+
+/** One X post's numbers, as X last reported them (OP-109). */
+export interface PostStats {
+  impressions: number
+  likes: number
+  reposts: number
+  replies: number
+  quotes: number
+  bookmarks: number
+}
+
+/** What a refresh would cost before it runs. Every dollar figure is an estimate. */
+export interface StatsEstimate {
+  /** The most posts a refresh reads. */
+  posts: number
+  dollars: number
+  /** X may return fewer, so this is a ceiling. */
+  upTo: boolean
+  /** When the prices in use were checked, or last edited. */
+  pricesAsOf: string
+}
+
+export interface StatsSyncResult {
+  posts: number
+  spent: number
+  syncedAt: string
+}
+
+/** One X post of the active account, with its stats and what it has cost on X. */
+export interface PostStatsRow {
+  remoteId: string
+  /** The OpenCatt post it belongs to; null for a post made outside the app. */
+  postId: string | null
+  text: string
+  postedAt: string
+  stats: PostStats
+  statsAt: string
+  /** What posting it cost; null for posts made outside the app. */
+  postingCost: number | null
+  /** The posting cost was estimated, for a post published before costs were recorded. */
+  postingEstimated: boolean
+  /** What reading its stats has cost so far. */
+  readsCost: number
+}
+
+export interface StatsTotals {
+  posts: number
+  stats: PostStats
+  postingCost: number
+  readsCost: number
+}
+
+/** One refresh's numbers, for charts: the account's totals and each post's (OP-109). */
+export interface StatsSnapshot {
+  at: string
+  totals: PostStats
+  posts: { remoteId: string; stats: PostStats }[]
+}
+
+/** The prices estimates use (OP-109), in dollars; X's defaults unless the user edited them. */
+export interface XPrices {
+  /** Reading one of your own posts (owned reads). */
+  ownedRead: number
+  post: number
+  postWithUrl: number
+  /** The date the defaults were checked on X's pricing page. */
+  asOf: string
+  edited: boolean
+  /** X's pricing page, to check them against. */
+  sourceUrl: string
+}
+
+/** The Dashboard's switch (OP-112): every post read, or only those OpenCatt published. */
+export type StatsFilter = 'all' | 'opencatt'
+
+export interface StatsApi {
+  estimate(): Promise<StatsEstimate>
+  /** Reads the active account's last 100 posts from X; rejects with a plain message. */
+  sync(): Promise<StatsSyncResult>
+  /** The active account's posts, newest first. */
+  list(): Promise<PostStatsRow[]>
+  totals(): Promise<StatsTotals>
+  lastSync(): Promise<{ at: string; spent: number } | null>
+  /** Every refresh of the active account, oldest first, for charts of growth over time. */
+  history(): Promise<StatsSnapshot[]>
+  /** Which posts the Dashboard shows for the active account (OP-112); 'opencatt' until changed. */
+  filter: {
+    get(): Promise<StatsFilter>
+    set(filter: StatsFilter): Promise<StatsFilter>
+  }
+  /** A sync ran, a post's cost was recorded, or prices changed. */
+  onChanged(listener: (event: { accountId: string | null }) => void): () => void
+  prices: {
+    get(): Promise<XPrices>
+    /** Rejects a negative or non-number price with a plain message. */
+    set(prices: Partial<Pick<XPrices, 'ownedRead' | 'post' | 'postWithUrl'>>): Promise<XPrices>
+    reset(): Promise<XPrices>
+  }
 }
 
 /** Autopilot for an X account turned on or off (OP-103). */
@@ -718,6 +830,7 @@ export interface OpenCatApi {
   video: VideoApi
   voice: VoiceApi
   autopilot: AutopilotApi
+  stats: StatsApi
   mcp: McpApi
   media: MediaApi
   onboarding: OnboardingApi

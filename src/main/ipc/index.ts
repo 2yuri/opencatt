@@ -21,6 +21,7 @@ import { SUPPORTED_EXTENSIONS } from '../media/files'
 import type { MediaImports } from '../media/imports'
 import type { PastedFiles } from '../media/pasted'
 import type { AutopilotStore } from '../agent/autopilot'
+import type { StatsService } from '../stats/service'
 import type { OnboardingService } from '../onboarding'
 import { ping } from '../ping'
 import { showPendingBadge } from '../badge'
@@ -42,9 +43,23 @@ export function registerIpc(
     writing?: WritingPromptStore
     pasted?: PastedFiles
     autopilot?: AutopilotStore
+    stats?: StatsService
   } = {}
 ): void {
-  const { prePrompt, voices, writing, pasted, autopilot } = extras
+  const { prePrompt, voices, writing, pasted, autopilot, stats } = extras
+  if (stats) {
+    ipcMain.handle(IpcChannel.StatsEstimate, () => stats.estimate())
+    ipcMain.handle(IpcChannel.StatsSync, () => stats.sync())
+    ipcMain.handle(IpcChannel.StatsList, () => stats.list())
+    ipcMain.handle(IpcChannel.StatsTotals, () => stats.totals())
+    ipcMain.handle(IpcChannel.StatsLastSync, () => stats.lastSync())
+    ipcMain.handle(IpcChannel.StatsHistory, () => stats.history())
+    ipcMain.handle(IpcChannel.StatsPricesGet, () => stats.prices())
+    ipcMain.handle(IpcChannel.StatsPricesSet, (_e, prices) => stats.setPrices(prices))
+    ipcMain.handle(IpcChannel.StatsPricesReset, () => stats.resetPrices())
+    ipcMain.handle(IpcChannel.StatsFilterGet, () => stats.filter())
+    ipcMain.handle(IpcChannel.StatsFilterSet, (_e, filter) => stats.setFilter(filter))
+  }
   if (autopilot) {
     ipcMain.handle(IpcChannel.AutopilotGet, (_e, accountId) => autopilot.get(String(accountId)))
     ipcMain.handle(IpcChannel.AutopilotSet, (_e, accountId, on) =>

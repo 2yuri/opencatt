@@ -34,6 +34,7 @@ import { videoPreface } from './agent/videoPreface'
 import { VideoPrePromptStore } from './agent/videoPrompt'
 import { VoiceStore, WritingPromptStore } from './agent/voice'
 import { AutopilotStore } from './agent/autopilot'
+import { StatsService, withPostingCosts } from './stats/service'
 import type { AssetSource } from './agent/render/assets'
 import { renderImageTool } from './agent/render/tool'
 import { renderVideoTool } from './agent/render/videoTool'
@@ -59,7 +60,7 @@ import { moveLegacyUserData } from './legacyData'
 import { openedAtLogin, upgradeLoginItem } from './loginItem'
 import { trayIconPath, windowIconPath } from './appIcons'
 import { Publisher } from './publisher'
-import { createTray, tellAboutTrayOnce } from './tray'
+import { createTray, onLastWindowClosed, tellAboutTrayOnce } from './tray'
 import { startUpdates } from './updates'
 import { XClient } from './x/client'
 
@@ -397,6 +398,20 @@ void app.whenReady().then(() => {
     }
   })
   authRef.current = auth
+  const x = new XClient({
+    auth,
+    mediaPath: (id) => stores!.media.pathOf(id),
+    videos: stores.xMedia
+  })
+  // Post stats read back from X on demand, and what calls to X cost (OP-109).
+  const stats = new StatsService({
+    db: stores.db,
+    settings: stores.settings,
+    activeAccount: () => auth.status().activeAccountId,
+    readTimeline: (accountId, max) => x.readTimeline(accountId, max),
+    onChanged: (accountId) => broadcast(IpcEvent.StatsChanged, { accountId })
+  })
+  stats.estimateOlderPosts()
   // Installs that pasted OAuth 1.0a keys before accounts existed get theirs now.
   void auth.adoptOAuth1()
   registerIpc(
@@ -424,18 +439,14 @@ void app.whenReady().then(() => {
         }
       }
     },
-    { prePrompt, voices, writing, pasted, autopilot }
+    { prePrompt, voices, writing, pasted, autopilot, stats }
   )
   // Posts go out at their time from here (OP-10), each as its own account (OP-5, OP-6).
-  const x = new XClient({
-    auth,
-    mediaPath: (id) => stores!.media.pathOf(id),
-    videos: stores.xMedia
-  })
   const accounts = stores.accounts
   publisher = new Publisher({
     posts: stores.posts,
-    publish: (post, onPart) => x.publish(post, onPart),
+    // Each X post's cost goes in the ledger once it's on X (OP-109), never breaking the publish.
+    publish: withPostingCosts((post, onPart) => x.publish(post, onPart), stats),
     prepare: (post) => x.prepare(post),
     account: (id) => accounts.get(id),
     onSignedOut: (account) => {
@@ -517,8 +528,15 @@ app.on('will-quit', () => {
   stores = undefined
 })
 
-// Closing the window keeps OpenCatt running in the tray, so scheduled posts still go out.
-app.on('window-all-closed', () => {
-  if (quitting) return
-  if (stores) tellAboutTrayOnce(stores.settings)
-})
+// Closing the window keeps OpenCatt running in the tray, so scheduled posts still go out; on macOS
+// it also leaves the Dock and Cmd-Tab (OP-107).
+app.on('window-all-closed', () =>
+  onLastWindowClosed({
+    quitting,
+    platform: process.platform,
+    tellOnce: () => {
+      if (stores) tellAboutTrayOnce(stores.settings)
+    },
+    hideDock: () => app.dock?.hide()
+  })
+)

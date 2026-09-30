@@ -414,3 +414,13 @@ body,
   color: var(--ds-text-2);
   cursor: pointer;
 }
+
+/* The Dashboard's refresh bar (OP-110): X answers in one call, so it can't count posts read. */
+@keyframes dashboard-progress {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(300%);
+  }
+}

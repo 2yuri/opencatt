@@ -5,6 +5,7 @@ import { ApprovalsScreen } from './approvals/ApprovalsScreen'
 import { CalendarScreen } from './calendar/CalendarScreen'
 import { ChatPanel } from './chat/ChatPanel'
 import { postRoute } from './chat/postRoute'
+import { DashboardScreen } from './dashboard/DashboardScreen'
 import { DayBoardScreen } from './day/DayBoardScreen'
 import { EditorProvider } from './editor/EditorProvider'
 import { IntegrationsScreen } from './integrations/IntegrationsScreen'
@@ -92,6 +93,7 @@ export function AppRoutes(): React.JSX.Element {
     <Routes>
       <Route path="/" element={<CalendarScreen />} />
       <Route path="/day/:date" element={<DayBoardScreen />} />
+      <Route path="/dashboard" element={<DashboardScreen />} />
       <Route path="/approvals" element={<ApprovalsScreen />} />
       <Route path="/integrations" element={<IntegrationsScreen />} />
       <Route path="/settings" element={<SettingsScreen />} />

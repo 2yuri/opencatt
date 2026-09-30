@@ -14,10 +14,14 @@ import type {
   Post,
   PostMedia,
   PostsChangedEvent,
+  PostStatsRow,
+  StatsFilter,
+  StatsSnapshot,
   VoiceChanged,
   VoiceProfile,
   WritingPrompt,
-  XAccount
+  XAccount,
+  XPrices
 } from '@shared/api'
 import { singlePart } from './parts'
 
@@ -26,6 +30,15 @@ type AgentEventInput = AgentEvent extends infer E
     ? Omit<E, 'accountId' | 'sessionId'> & { accountId?: string | null; sessionId?: string | null }
     : never
   : never
+
+const DEFAULT_FAKE_PRICES: XPrices = {
+  ownedRead: 0.001,
+  post: 0.015,
+  postWithUrl: 0.2,
+  asOf: '2026-09-30',
+  edited: false,
+  sourceUrl: 'https://docs.x.com/x-api/getting-started/pricing'
+}
 
 export interface FakeApi {
   api: OpenCatApi
@@ -65,6 +78,21 @@ export interface FakeApi {
   autopilot: Set<string>
   /** Turns an account's Autopilot on or off elsewhere and tells the renderer, as main does. */
   autopilotChanged(accountId: string, on: boolean): void
+  /** What stats answers (OP-110); tests fill it, and stats.sync applies `nextSync`. */
+  stats: FakeStats
+  /** Tells the renderer stats changed, as main does. */
+  statsChanged(): void
+}
+
+export interface FakeStats {
+  rows: PostStatsRow[]
+  history: StatsSnapshot[]
+  lastSync: { at: string; spent: number } | null
+  prices: XPrices
+  /** The Dashboard's saved switch (OP-112). */
+  filter: StatsFilter
+  /** What the next sync does: new rows and snapshot, or an error in main's words. */
+  nextSync: { rows: PostStatsRow[]; snapshot: StatsSnapshot } | Error | null
 }
 
 /** A chat as chat.sessions lists it; the fields given win. */
@@ -261,6 +289,15 @@ export function fakeApi(history: ChatMessage[] = []): FakeApi {
   }
   // Autopilot per account (OP-103): like main, set refuses an account that isn't connected.
   const autopilot = new Set<string>()
+  const statsListeners = new Set<() => void>()
+  const stats: FakeStats = {
+    rows: [],
+    history: [],
+    lastSync: null,
+    prices: { ...DEFAULT_FAKE_PRICES },
+    filter: 'opencatt',
+    nextSync: null
+  }
   const autopilotListeners = new Set<(e: AutopilotChanged) => void>()
   const autopilotChanged = (accountId: string, on: boolean): void => {
     if (on) autopilot.add(accountId)
@@ -461,6 +498,72 @@ export function fakeApi(history: ChatMessage[] = []): FakeApi {
         return status()
       })
     },
+    stats: {
+      estimate: vi.fn(() =>
+        Promise.resolve({
+          posts: 100,
+          dollars: Math.round(100 * stats.prices.ownedRead * 1e6) / 1e6,
+          upTo: true,
+          pricesAsOf: stats.prices.asOf
+        })
+      ),
+      sync: vi.fn(() => {
+        const next = stats.nextSync
+        if (next instanceof Error) return Promise.reject(next)
+        if (!next)
+          return Promise.resolve({ posts: 0, spent: 0, syncedAt: new Date().toISOString() })
+        stats.rows = next.rows
+        stats.history = [...stats.history, next.snapshot]
+        stats.lastSync = { at: next.snapshot.at, spent: next.rows.length * stats.prices.ownedRead }
+        return Promise.resolve({
+          posts: next.rows.length,
+          spent: stats.lastSync.spent,
+          syncedAt: next.snapshot.at
+        })
+      }),
+      list: vi.fn(() => Promise.resolve(stats.rows)),
+      totals: vi.fn(() => {
+        const sum = { impressions: 0, likes: 0, reposts: 0, replies: 0, quotes: 0, bookmarks: 0 }
+        let postingCost = 0
+        let readsCost = 0
+        for (const row of stats.rows) {
+          for (const key of Object.keys(sum) as (keyof typeof sum)[]) sum[key] += row.stats[key]
+          postingCost += row.postingCost ?? 0
+          readsCost += row.readsCost
+        }
+        return Promise.resolve({ posts: stats.rows.length, stats: sum, postingCost, readsCost })
+      }),
+      lastSync: vi.fn(() => Promise.resolve(stats.lastSync)),
+      history: vi.fn(() => Promise.resolve(stats.history)),
+      filter: {
+        get: vi.fn(() => Promise.resolve(stats.filter)),
+        set: vi.fn((filter: StatsFilter) => {
+          stats.filter = filter
+          return Promise.resolve(filter)
+        })
+      },
+      onChanged: vi.fn((listener: () => void) => {
+        statsListeners.add(listener)
+        return () => statsListeners.delete(listener)
+      }),
+      prices: {
+        get: vi.fn(() => Promise.resolve({ ...stats.prices })),
+        set: vi.fn((patch: Partial<XPrices>) => {
+          for (const [key, value] of Object.entries(patch)) {
+            if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) {
+              return Promise.reject(new Error('A price must be a number of dollars, zero or more.'))
+            }
+            ;(stats.prices as unknown as Record<string, number>)[key] = value
+          }
+          stats.prices.edited = true
+          return Promise.resolve({ ...stats.prices })
+        }),
+        reset: vi.fn(() => {
+          stats.prices = { ...DEFAULT_FAKE_PRICES }
+          return Promise.resolve({ ...stats.prices })
+        })
+      }
+    },
     autopilot: {
       get: vi.fn((accountId: string) => Promise.resolve(autopilot.has(accountId))),
       set: vi.fn((accountId: string, on: boolean) => {
@@ -535,6 +638,10 @@ export function fakeApi(history: ChatMessage[] = []): FakeApi {
     sessionsChanged,
     autopilot,
     autopilotChanged,
+    get stats() {
+      return stats
+    },
+    statsChanged: () => statsListeners.forEach((l) => l()),
     emit: (event) =>
       agentListeners.forEach((l) =>
         l({ accountId: null, sessionId: null, ...event } as AgentEvent)

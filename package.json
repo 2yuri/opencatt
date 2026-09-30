@@ -1,7 +1,7 @@
 {
   "name": "opencat",
   "productName": "OpenCatt",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "Open source desktop app that drafts and schedules posts on X, driven by a chat agent.",
   "license": "MIT",
   "author": "OpenCatt contributors",

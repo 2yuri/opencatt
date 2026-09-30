@@ -51,20 +51,23 @@ export function Welcome({ onNext }: { onNext: () => void }): React.JSX.Element {
         ))}
       </ul>
       <p
-        className="m-0 flex flex-wrap items-center gap-[8px] text-[12px] text-ds-text-3"
+        className="m-0 flex items-start gap-[8px] text-[12px] leading-[18px] text-ds-text-3"
         data-testid="cost-note"
       >
-        <Info size={14} className="shrink-0" aria-hidden="true" />
-        Posting needs a paid plan on X's API, Pay Per Use or higher; the free plan can't post. A
-        post with a link costs much more than one without.
-        <a
-          href={XLinks.pricing}
-          target="_blank"
-          rel="noreferrer"
-          className="text-ds-accent-text no-underline"
-        >
-          X&apos;s pricing ↗
-        </a>
+        {/* Beside the first line, however far the sentence wraps (OP-108). */}
+        <Info size={14} className="mt-[2px] shrink-0" aria-hidden="true" />
+        <span>
+          Posting needs a paid plan on X&apos;s API, Pay Per Use or higher; the free plan can&apos;t
+          post. A post with a link costs much more than one without.{' '}
+          <a
+            href={XLinks.pricing}
+            target="_blank"
+            rel="noreferrer"
+            className="whitespace-nowrap text-ds-accent-text no-underline"
+          >
+            X&apos;s pricing ↗
+          </a>
+        </span>
       </p>
     </StepPage>
   )

@@ -40,6 +40,16 @@ describe('Sidebar', () => {
     expect(screen.getByTestId('where').textContent).toBe('/approvals')
   })
 
+  it('lists Dashboard first and shows the current screen in the accent colour, no pill', () => {
+    renderSidebar({ count: 0, first: null })
+    const links = screen.getAllByRole('link').map((l) => l.textContent)
+    expect(links.slice(0, 3)).toEqual(['Dashboard', 'Calendar', 'Approvals'])
+    const calendar = screen.getByRole('link', { name: 'Calendar' })
+    expect(calendar.className).toContain('text-ds-accent-text')
+    expect(calendar.className).not.toContain('bg-ds-raised')
+    expect(screen.getByRole('link', { name: 'Dashboard' }).className).toContain('text-ds-text-2')
+  })
+
   it('shows no badge when nothing waits', async () => {
     renderSidebar({ count: 0, first: null })
     expect(await screen.findByRole('link', { name: 'Approvals' })).toBeTruthy()

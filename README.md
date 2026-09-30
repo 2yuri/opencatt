@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/images/banner.png" alt="OpenCatt: your posts, your calendar, your AI sidekick" width="100%">
+  <img src="docs/images/hero.webp" alt="OpenCatt: schedule your X posts, with an agent that asks first" width="100%">
 </p>
 
 <p align="center">
@@ -24,32 +24,57 @@ Installers for macOS, Windows and Linux are on the
 
 ## A calendar for your next idea
 
-<img src="docs/images/calendar.png" alt="The OpenCatt calendar with scheduled posts and the agent panel" width="100%">
+<img src="docs/images/calendar-agent.webp" alt="The OpenCatt calendar with scheduled posts and the agent panel" width="100%">
 
 Every day on the calendar shows what is scheduled, waiting for approval and already posted. Open
 a day to write, edit, reschedule or delete posts, with single posts, threads of up to 25 parts,
-images and videos.
+images and videos. Tell the agent in the side panel what to post, in plain words, and it drafts
+and schedules it for you.
 
 ## Your agent drafts. You decide.
 
-<img src="docs/images/approvals.png" alt="The Approvals page with posts the agent drafted" width="100%">
+<img src="docs/images/approvals-autopilot.webp" alt="The Approvals page with posts the agent drafted, and Autopilot switched on" width="100%">
 
-Ask the agent in the side panel to draft a week of posts, move one to Friday or explain why a post
-failed. Everything it writes lands on the Approvals page, where you approve, edit or reject it.
+Everything the agent writes lands on the Approvals page, where you approve, edit or reject it.
 Outside agents can do the same through OpenCatt's MCP server, and their posts wait for you too.
+If you trust it with an account, turn on Autopilot for that account: posts Claude or a connected
+agent writes for it are scheduled straight away, marked "Scheduled by Autopilot", and you can
+still edit or delete them before they go out. It's off by default and shows a badge while it's on.
+
+## See what works
+
+<img src="docs/images/dashboard.webp" alt="The Dashboard with views over time, views by post and engagement rate" width="100%">
+
+The Dashboard reads your last 100 posts from X and shows views, likes, reposts and replies, how
+they grow from one refresh to the next, and which posts do best. X charges for reads, so the
+Refresh button says what it will cost before it runs, and every post shows what it cost you,
+estimated from X's current prices. You can show all your posts or only the ones made in OpenCatt.
+
+## A chat for every idea
+
+<img src="docs/images/chat-sessions.webp" alt="The agent panel's chat menu with several conversations" width="100%">
+
+Keep launch planning, weekly recaps and one-off threads in separate conversations with the agent.
+Each account has its own chats, each with its own history and context, and you switch between
+them from the panel's title.
 
 ## Features
 
 - Calendar with day boards for scheduled, pending and posted posts
 - Chat agent through the local `claude` CLI on your existing Claude plan, or an Anthropic API key
+- Several chats per account, each with its own history and context
 - Text, Image and Video modes: the agent writes posts and designs images and short videos for them
 - Approval step for every post an agent writes, in the app or over MCP
+- Autopilot per account, for when you want the agent's posts scheduled without asking
+- Dashboard of views, likes, reposts, replies and engagement per post, with the cost of every
+  refresh shown before it runs
 - Publishing on schedule, with retries, and videos that X is still processing don't hold up the rest
 - Several X accounts with a switcher, each with its own posts, chats and writing voice
 - Integrations screen to set up the MCP server for other tools and see your connected accounts
 - Threads, pasted images and files, and a full-size viewer for images and videos
 - Your own X developer app, set up with a step-by-step guide on first run
-- Starts at login in the tray if you want, so posts go out while the window is closed
+- Keeps running when you close the window, so posts go out on time: in the menu bar on macOS, in
+  the tray on Windows and Linux, and it can start at login
 - Local SQLite storage, secrets in the OS keychain through Electron's `safeStorage`
 
 ## Requirements

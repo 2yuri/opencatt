@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react'
-import { Calendar, Cat, Inbox, Plug, Settings } from 'lucide-react'
+import { Calendar, Cat, ChartColumn, Inbox, Plug, Settings } from 'lucide-react'
 import { Link } from 'react-router'
 import { usePending } from '../calendar/usePending'
 import { NavItem } from '../ui'
@@ -37,6 +37,7 @@ export function Sidebar({ connected }: { connected: boolean }): React.JSX.Elemen
         {!rail && <span className="sidebar-name">OpenCatt</span>}
       </div>
 
+      <Entry to="/dashboard" label="Dashboard" rail={rail} icon={<ChartColumn size={16} />} />
       <Entry to="/" end label="Calendar" rail={rail} icon={<Calendar size={16} />} />
       <Entry
         to="/approvals"
