@@ -1,0 +1,35 @@
+name: Pages
+
+# The site in site/ (OP-131): the landing page and the sign-in return pages that need a fixed https
+# address. It reaches 2yuri/opencatt only through scripts/publish-public.sh, and deploys from there.
+on:
+  push:
+    branches: [main]
+    paths: ['site/**', '.github/workflows/pages.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    # Only the public repo has Pages; the private one skips this.
+    if: github.repository == '2yuri/opencatt'
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+      - id: deployment
+        uses: actions/deploy-pages@v4

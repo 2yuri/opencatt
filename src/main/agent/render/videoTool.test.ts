@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { PostMedia } from '@shared/api'
+import { PLATFORM_RULES } from '@shared/platforms'
 import { callTool } from '../tools'
 import { RenderError } from './tool'
 import { renderVideoTool, type VideoRecorder } from './videoTool'
@@ -205,5 +206,53 @@ describe('render_video recordings per turn (OP-91)', () => {
     expect(refused.isError).toBe(true)
     expect(JSON.parse(refused.content).error).toContain("You've recorded 3 videos this turn")
     expect(record).toHaveBeenCalledTimes(3)
+  })
+})
+
+describe('render_video for the turn account’s platform (OP-122)', () => {
+  function tiktok() {
+    const record = vi.fn<VideoRecorder['record']>(async (_html, spec) => ({
+      path: '/tmp/x.mp4',
+      poster: Buffer.from('png'),
+      seconds: spec.seconds
+    }))
+    const tool = renderVideoTool(
+      { record },
+      {
+        import: (_path, video): PostMedia => ({
+          id: 'v1',
+          kind: 'video',
+          mime: 'video/mp4',
+          bytes: 1,
+          width: video.width,
+          height: video.height,
+          durationMs: video.durationMs,
+          alt: null,
+          url: 'opencat-media://media/v1.mp4'
+        })
+      },
+      () => null,
+      () => null,
+      undefined,
+      undefined,
+      () => PLATFORM_RULES.tiktok
+    )
+    return { record, run: (input: unknown) => callTool([tool], 'render_video', input) }
+  }
+
+  it('records 1080x1920 by default on TikTok, a size X would refuse', async () => {
+    const { record, run } = tiktok()
+    const out = await run({ html: '<p>go</p>' })
+    expect(out.isError).toBe(false)
+    expect(record.mock.calls[0]![1]).toEqual({ width: 1080, height: 1920, seconds: 15 })
+  })
+
+  it("refuses a video shorter than TikTok's minimum", async () => {
+    const { run } = tiktok()
+    const out = await run({ html: '<p>go</p>', seconds: 2 })
+    expect(out.isError).toBe(true)
+    expect(JSON.parse(out.content).error).toBe(
+      'seconds must be between 3 and 60 for a TikTok video'
+    )
   })
 })

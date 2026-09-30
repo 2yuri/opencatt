@@ -2,7 +2,7 @@ import { ArrowDown, ArrowUp, Trash2 } from 'lucide-react'
 
 import type { PostMedia } from '@shared/api'
 import type { DraftPart } from './draft'
-import { MAX_POST_LENGTH, measureText } from './postText'
+import { measureText } from './postText'
 import { Button } from '../ui'
 import { ImportErrorRow, ImportProgressRow } from '../media/ImportProgress'
 import { useMediaImport, type MediaImport } from '../media/useMediaImport'
@@ -161,7 +161,7 @@ export function PartEditor({ textRef, ...props }: PartEditorProps): React.JSX.El
           data-testid="counter"
           aria-live="polite"
         >
-          {MAX_POST_LENGTH - measure.remaining} / {MAX_POST_LENGTH}
+          {measure.length} / {measure.max}
         </span>
       </div>
       {props.problem && (

@@ -19,11 +19,17 @@ export interface McpPaths {
   exe: string
   /** out/main/mcp-bridge.js */
   bridge: string
+  /** The server's port: MCP_PORT, or another one for an unpackaged build (OP-134). */
+  port?: number
 }
 
 /** Turns the MCP server on and off and hands out the config clients need. */
 export class McpManager {
   private error: string | null = null
+
+  private get port(): number {
+    return this.paths.port ?? MCP_PORT
+  }
 
   constructor(
     private readonly server: McpHttpServer,
@@ -63,7 +69,7 @@ export class McpManager {
 
   status(): McpStatus {
     const enabled = this.settings.get(ENABLED_SETTING) === true
-    const base = { enabled, running: this.server.running, error: this.error }
+    const base = { enabled, running: this.server.running, error: this.error, port: this.port }
     if (!enabled) return base
     const { url, token } = { url: this.url(), token: this.token() }
     return {
@@ -86,7 +92,7 @@ export class McpManager {
   }
 
   private url(): string {
-    return `http://127.0.0.1:${MCP_PORT}${MCP_PATH}`
+    return `http://127.0.0.1:${this.port}${MCP_PATH}`
   }
 
   private async start(): Promise<void> {
@@ -98,7 +104,7 @@ export class McpManager {
       const code = (err as NodeJS.ErrnoException).code
       this.error =
         code === 'EADDRINUSE'
-          ? `Port ${MCP_PORT} is already in use by another app, so other agents can't connect. Close that app, then turn this off and on again.`
+          ? `Port ${this.port} is already in use by another app, so other agents can't connect. Close that app, then turn this off and on again.`
           : `The MCP server could not start: ${err instanceof Error ? err.message : String(err)}`
     }
   }

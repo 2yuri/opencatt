@@ -13,6 +13,7 @@ import {
 } from 'electron'
 import { autoUpdater } from 'electron-updater'
 import { IpcEvent } from '@shared/api'
+import { rulesFor, type PlatformRules } from '@shared/platforms'
 import { CredentialStore } from './auth/credentials'
 import { safeStorageCipher } from './auth/safeStorageCipher'
 import { XAuthService } from './auth/service'
@@ -35,6 +36,8 @@ import { VideoPrePromptStore } from './agent/videoPrompt'
 import { VoiceStore, WritingPromptStore } from './agent/voice'
 import { AutopilotStore } from './agent/autopilot'
 import { StatsService, withPostingCosts } from './stats/service'
+import { CommentsService } from './comments/service'
+import { commentTools } from './agent/commentTools'
 import type { AssetSource } from './agent/render/assets'
 import { renderImageTool } from './agent/render/tool'
 import { renderVideoTool } from './agent/render/videoTool'
@@ -57,12 +60,18 @@ import { VideoPreparer } from './media/video'
 import { OnboardingService } from './onboarding'
 import { showPendingBadge } from './badge'
 import { moveLegacyUserData } from './legacyData'
+import { DEV_APP_NAME, devUserData, mcpPortFor } from './devBuild'
 import { openedAtLogin, upgradeLoginItem } from './loginItem'
 import { trayIconPath, windowIconPath } from './appIcons'
 import { Publisher } from './publisher'
 import { createTray, onLastWindowClosed, tellAboutTrayOnce } from './tray'
 import { startUpdates } from './updates'
 import { XClient } from './x/client'
+
+// An unpackaged build (pnpm dev, a branch under test) keeps its own data, lock and keychain name,
+// so it never migrates or publishes from the installed app's database (OP-134). First of all:
+// nothing may read userData before this.
+if (!app.isPackaged) app.setPath('userData', devUserData(app.getPath('appData'), process.env))
 
 registerMediaScheme()
 
@@ -88,7 +97,8 @@ else app.on('second-instance', () => showWindow())
 // The name safeStorage encrypts with (the macOS keychain entry "OpenCat Safe Storage", libsecret
 // on Linux) follows this call instead, so it stays OpenCat and moved credentials still decrypt.
 // Never change it. On Windows the key is in userData's Local State, which moves with the folder.
-app.setName('OpenCat')
+// An unpackaged build encrypts with its own name, so its keys never touch the release's entry.
+app.setName(app.isPackaged ? 'OpenCat' : DEV_APP_NAME)
 app.setAboutPanelOptions({
   applicationName: 'OpenCatt',
   credits:
@@ -117,7 +127,7 @@ function createWindow(): void {
     minWidth: 960,
     minHeight: 600,
     show: false,
-    title: 'OpenCatt',
+    title: app.isPackaged ? 'OpenCatt' : 'OpenCatt (dev)',
     icon: existingOrUndefined(windowIconPath(iconPlaces())),
     // Dark only (boss, epic 8). The traffic lights sit in the sidebar on macOS.
     backgroundColor: '#09090b',
@@ -133,6 +143,13 @@ function createWindow(): void {
   })
 
   window.once('ready-to-show', () => window.show())
+  // The page's <title> would drop the "(dev)" that tells a test build from the installed app.
+  if (!app.isPackaged) {
+    window.on('page-title-updated', (event, title) => {
+      event.preventDefault()
+      window.setTitle(`${title} (dev)`)
+    })
+  }
 
   // Links open in the user's browser, never in a new app window.
   window.webContents.setWindowOpenHandler(({ url }) => {
@@ -230,22 +247,46 @@ void app.whenReady().then(() => {
           handle: account.handle,
           name: account.name,
           voice: voices.get(account.id),
-          autopilot: autopilot.get(account.id)
+          autopilot: autopilot.get(account.id),
+          platform: account.platform
         }
       : null
   }
   const turnScope = new TurnScope()
-  const agentTools = postTools(
-    stores.posts,
-    undefined,
-    'agent',
-    // The files in the turn's own chat (OP-94); none outside a turn.
-    () => (turnScope.session ? chat.mediaIds(turnScope.session) : new Set<string>()),
-    {
-      forCall: () => turnScope.current?.id ?? null,
-      attached: () => turnScope.attached
-    }
-  )
+  // What each account's posts may be (OP-122), for the agent's and MCP's tools and render_video.
+  const rulesOf = (accountId: string | null): PlatformRules =>
+    rulesFor((accountId && authRef.current?.platformOf(accountId)) || 'x')
+  // Replies to the account's X posts (OP-124). X and the price table are made further down; these
+  // are only called once the app is running.
+  const comments = new CommentsService({
+    db: stores.db,
+    settings: stores.settings,
+    posts: stores.posts,
+    activeAccount: () => authRef.current?.status().activeAccountId ?? null,
+    ownedReadPrice: () => {
+      const prices = stats.prices()
+      return { price: prices.ownedRead, asOf: prices.asOf }
+    },
+    readMentions: (accountId, sinceId, untilId) => x.readMentions(accountId, sinceId, untilId),
+    platformOf: (accountId) => authRef.current?.platformOf(accountId) ?? null,
+    onChanged: (accountId) => broadcast(IpcEvent.CommentsChanged, { accountId })
+  })
+  const turnAccount = {
+    forCall: () => turnScope.current?.id ?? null,
+    attached: () => turnScope.attached,
+    rules: rulesOf
+  }
+  const agentTools = [
+    ...postTools(
+      stores.posts,
+      undefined,
+      'agent',
+      // The files in the turn's own chat (OP-94); none outside a turn.
+      () => (turnScope.session ? chat.mediaIds(turnScope.session) : new Set<string>()),
+      turnAccount
+    ),
+    ...commentTools(comments, undefined, 'agent', turnAccount)
+  ]
   // Attached images go to the model as pictures unless the user turned that off (OP-21).
   const media = stores.media
   const images = electronImageLoader(
@@ -298,7 +339,8 @@ void app.whenReady().then(() => {
       () => turnScope.signal,
       (png) => (png.length ? { mediaType: 'image/png', data: png.toString('base64') } : null),
       renderAssets,
-      { used: () => turnScope.videos, add: () => void turnScope.videos++ }
+      { used: () => turnScope.videos, add: () => void turnScope.videos++ },
+      () => rulesOf(turnScope.current?.id ?? null)
     )
   ]
   const runner = new AnthropicRunner(config, tools, undefined, undefined, images)
@@ -349,27 +391,26 @@ void app.whenReady().then(() => {
     (accountId) => broadcast(IpcEvent.ChatSessionsChanged, { accountId })
   )
 
+  const mcpAccounts = namedAccounts(
+    () => authRef.current?.status().accounts ?? [],
+    () => authRef.current?.status().activeAccountId ?? null,
+    rulesOf
+  )
   // Off until the user turns it on; the same tools, minus editing and deleting.
   mcp = new McpManager(
     new McpHttpServer({
-      tools: mcpTools(
-        postTools(
-          stores.posts,
-          undefined,
-          'mcp',
-          undefined,
-          namedAccounts(
-            () => authRef.current?.status().accounts ?? [],
-            () => authRef.current?.status().activeAccountId ?? null
-          )
-        )
-      ),
+      tools: mcpTools([
+        ...postTools(stores.posts, undefined, 'mcp', undefined, mcpAccounts),
+        ...commentTools(comments, undefined, 'mcp', mcpAccounts)
+      ]),
       token: () => mcp!.token(),
-      version: app.getVersion()
+      version: app.getVersion(),
+      port: mcpPortFor(app.isPackaged, process.env)
     }),
     stores.settings,
     {
       connectionFile: join(userData, 'mcp.json'),
+      port: mcpPortFor(app.isPackaged, process.env),
       exe: process.execPath,
       bridge: join(__dirname, 'mcp-bridge.js')
     }
@@ -409,6 +450,7 @@ void app.whenReady().then(() => {
     settings: stores.settings,
     activeAccount: () => auth.status().activeAccountId,
     readTimeline: (accountId, max) => x.readTimeline(accountId, max),
+    platformOf: (accountId) => auth.platformOf(accountId),
     onChanged: (accountId) => broadcast(IpcEvent.StatsChanged, { accountId })
   })
   stats.estimateOlderPosts()
@@ -439,7 +481,7 @@ void app.whenReady().then(() => {
         }
       }
     },
-    { prePrompt, voices, writing, pasted, autopilot, stats }
+    { prePrompt, voices, writing, pasted, autopilot, stats, comments }
   )
   // Posts go out at their time from here (OP-10), each as its own account (OP-5, OP-6).
   const accounts = stores.accounts

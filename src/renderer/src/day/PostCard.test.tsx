@@ -18,6 +18,7 @@ let auth: {
 
 const account = (id: string, handle: string): XAccount => ({
   id,
+  platform: 'x',
   handle,
   name: null,
   avatarUrl: null,

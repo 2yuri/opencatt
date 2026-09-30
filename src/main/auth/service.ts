@@ -1,4 +1,5 @@
 import type { AuthStatus } from '@shared/api'
+import type { Platform } from '@shared/platforms'
 import type { OAuth1Keys } from '@shared/x'
 import { AuthError } from '@shared/authErrors'
 import type { AccountsStore } from '../db/accounts'
@@ -80,8 +81,14 @@ export class XAuthService {
     this.now = deps.now ?? (() => new Date())
     deps.posts.useAccounts({
       active: () => this.activeAccountId(),
-      canPost: (id) => this.deps.accounts.get(id)?.needsReconnect === false
+      canPost: (id) => this.deps.accounts.get(id)?.needsReconnect === false,
+      platform: (id) => this.platformOf(id)
     })
+  }
+
+  /** The account's platform, or null when there's no such account (OP-118). */
+  platformOf(accountId: string): Platform | null {
+    return this.deps.accounts.get(accountId)?.platform ?? null
   }
 
   status(): AuthStatus {

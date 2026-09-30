@@ -8,6 +8,7 @@ import type {
   ChatMessage,
   ChatSession,
   ChatSessionsChanged,
+  Comment,
   JsonValue,
   MediaProgressEvent,
   OpenCatApi,
@@ -82,6 +83,21 @@ export interface FakeApi {
   stats: FakeStats
   /** Tells the renderer stats changed, as main does. */
   statsChanged(): void
+  /** What comments answers (OP-124); tests fill it, and comments.refresh applies `nextRefresh`. */
+  comments: FakeComments
+  /** Tells the renderer comments changed, as main does. */
+  commentsChanged(): void
+}
+
+export interface FakeComments {
+  rows: Comment[]
+  lastRefresh: { at: string; spent: number } | null
+  /** Owned-read price the estimate uses, as main's X prices. */
+  price: number
+  /** What the next refresh does: comments to add or update, or an error in main's words. */
+  nextRefresh: Comment[] | Error | null
+  /** What the next reply does: an error in main's words, or null to succeed. */
+  nextReplyError: Error | null
 }
 
 export interface FakeStats {
@@ -130,6 +146,7 @@ export const DEFAULT_VIDEO_PROMPT = 'Make a {duration}-second showreel for this 
 export function xAccount(handle: string, fields: Partial<XAccount> = {}): XAccount {
   return {
     id: handle,
+    platform: 'x',
     handle,
     name: null,
     avatarUrl: null,
@@ -180,6 +197,7 @@ export function post(fields: Partial<Post> & Pick<Post, 'id' | 'text' | 'schedul
     nextAttemptAt: null,
     createdBy: 'user',
     autopilot: false,
+    replyTo: null,
     status: 'scheduled',
     postedAt: null,
     remoteId: null,
@@ -191,6 +209,33 @@ export function post(fields: Partial<Post> & Pick<Post, 'id' | 'text' | 'schedul
     ...fields
   }
   return { ...base, parts: base.parts ?? singlePart(base) }
+}
+
+/** A comment as comments.list answers it (OP-124); the fields given win. */
+export function comment(fields: Partial<Comment> & Pick<Comment, 'remoteId'>): Comment {
+  return {
+    accountId: 'acct-1',
+    conversationId: 'x-1',
+    inReplyTo: 'x-1',
+    postId: null,
+    thread: {
+      remoteId: 'x-1',
+      text: 'Our post',
+      createdAt: '2026-09-29T09:00:00.000Z',
+      url: 'https://x.com/i/web/status/x-1'
+    },
+    threadParts: [],
+    path: [],
+    pathComplete: true,
+    parent: null,
+    author: { id: 'u-1', handle: 'someone', name: 'Someone' },
+    text: 'Nice post!',
+    createdAt: '2026-09-30T12:00:00.000Z',
+    url: `https://x.com/someone/status/${fields.remoteId}`,
+    readAt: null,
+    answer: null,
+    ...fields
+  }
 }
 
 /** A window.opencat backed by maps, with agent and posts events the test drives. */
@@ -298,6 +343,17 @@ export function fakeApi(history: ChatMessage[] = []): FakeApi {
     filter: 'opencatt',
     nextSync: null
   }
+  // Comments (OP-124): refresh applies `nextRefresh`, reply makes a scheduled post answering one.
+  const commentListeners = new Set<(e: { accountId: string | null }) => void>()
+  const comments: FakeComments = {
+    rows: [],
+    lastRefresh: null,
+    price: 0.001,
+    nextRefresh: null,
+    nextReplyError: null
+  }
+  const commentsChanged = (): void => commentListeners.forEach((l) => l({ accountId: null }))
+  let replyId = 0
   const autopilotListeners = new Set<(e: AutopilotChanged) => void>()
   const autopilotChanged = (accountId: string, on: boolean): void => {
     if (on) autopilot.add(accountId)
@@ -308,6 +364,67 @@ export function fakeApi(history: ChatMessage[] = []): FakeApi {
   const video = prompt('video', DEFAULT_VIDEO_PROMPT, 4_000)
 
   const api = {
+    comments: {
+      estimate: vi.fn(() =>
+        Promise.resolve({
+          reads: 100,
+          dollars: Math.round(100 * comments.price * 1e6) / 1e6,
+          upTo: true,
+          pricesAsOf: '2026-09-30'
+        })
+      ),
+      refresh: vi.fn(() => {
+        const next = comments.nextRefresh
+        if (next instanceof Error) return Promise.reject(next)
+        const at = new Date().toISOString()
+        const read = next?.length ?? 0
+        for (const row of next ?? []) {
+          comments.rows = [row, ...comments.rows.filter((c) => c.remoteId !== row.remoteId)]
+        }
+        comments.lastRefresh = { at, spent: read * comments.price }
+        return Promise.resolve({
+          read,
+          kept: read,
+          spent: read * comments.price,
+          refreshedAt: at,
+          more: false
+        })
+      }),
+      list: vi.fn(() =>
+        Promise.resolve([...comments.rows].sort((a, b) => b.createdAt.localeCompare(a.createdAt)))
+      ),
+      lastRefresh: vi.fn(() => Promise.resolve(comments.lastRefresh)),
+      markRead: vi.fn((remoteIds: string[]) => {
+        const at = new Date().toISOString()
+        comments.rows = comments.rows.map((c) =>
+          remoteIds.includes(c.remoteId) && !c.readAt ? { ...c, readAt: at } : c
+        )
+        return Promise.resolve()
+      }),
+      reply: vi.fn((remoteId: string, reply: { text: string; scheduledAt?: string }) => {
+        if (comments.nextReplyError) return Promise.reject(comments.nextReplyError)
+        const target = comments.rows.find((c) => c.remoteId === remoteId)
+        if (!target) return Promise.reject(new Error('That comment is gone.'))
+        const scheduledAt = reply.scheduledAt ?? new Date().toISOString()
+        const made = post({
+          id: `reply-${++replyId}`,
+          text: reply.text,
+          scheduledAt,
+          accountId: target.accountId
+        })
+        posts.set(made.id, made)
+        comments.rows = comments.rows.map((c) =>
+          c.remoteId === remoteId
+            ? { ...c, answer: { postId: made.id, status: made.status, scheduledAt } }
+            : c
+        )
+        return Promise.resolve(made)
+      }),
+      onChanged: vi.fn((listener: (e: { accountId: string | null }) => void) => {
+        commentListeners.add(listener)
+        return () => commentListeners.delete(listener)
+      })
+    },
     ping: vi.fn().mockResolvedValue({ message: 'pong', electron: '44.0.0', platform: 'linux' }),
     locale: { weekStart: vi.fn().mockResolvedValue(1) },
     app: {
@@ -642,6 +759,10 @@ export function fakeApi(history: ChatMessage[] = []): FakeApi {
       return stats
     },
     statsChanged: () => statsListeners.forEach((l) => l()),
+    get comments() {
+      return comments
+    },
+    commentsChanged,
     emit: (event) =>
       agentListeners.forEach((l) =>
         l({ accountId: null, sessionId: null, ...event } as AgentEvent)

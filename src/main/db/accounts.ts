@@ -1,9 +1,11 @@
 import type { XAccount } from '@shared/api'
+import type { Platform } from '@shared/platforms'
 import type { XAuthMode } from '@shared/x'
 import type { Database } from './database'
 
 interface AccountRow {
   id: string
+  platform: Platform
   handle: string
   name: string | null
   avatar_url: string | null
@@ -15,13 +17,15 @@ interface AccountRow {
 
 export interface AccountProfile {
   id: string
+  /** X when left out. An account keeps the platform it was added with. */
+  platform?: Platform
   handle: string
   name: string | null
   avatarUrl: string | null
   mode: XAuthMode
 }
 
-/** The X accounts the user connected, oldest first. Their tokens live in the CredentialStore. */
+/** The accounts the user connected on every platform, oldest first. Their tokens live in the CredentialStore. */
 export class AccountsStore {
   constructor(
     private readonly db: Database,
@@ -46,13 +50,23 @@ export class AccountsStore {
     const at = this.now().toISOString()
     this.db
       .prepare(
-        `INSERT INTO accounts (id, handle, name, avatar_url, mode, needs_reconnect, added_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, 0, ?, ?)
+        `INSERT INTO accounts
+           (id, platform, handle, name, avatar_url, mode, needs_reconnect, added_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?)
          ON CONFLICT (id) DO UPDATE SET handle = excluded.handle, name = excluded.name,
            avatar_url = excluded.avatar_url, mode = excluded.mode, needs_reconnect = 0,
            updated_at = excluded.updated_at`
       )
-      .run(profile.id, profile.handle, profile.name, profile.avatarUrl, profile.mode, at, at)
+      .run(
+        profile.id,
+        profile.platform ?? 'x',
+        profile.handle,
+        profile.name,
+        profile.avatarUrl,
+        profile.mode,
+        at,
+        at
+      )
     return this.get(profile.id)!
   }
 
@@ -66,6 +80,7 @@ export class AccountsStore {
 function fromRow(row: AccountRow): XAccount {
   return {
     id: row.id,
+    platform: row.platform,
     handle: row.handle,
     name: row.name,
     avatarUrl: row.avatar_url,

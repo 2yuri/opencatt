@@ -3,7 +3,13 @@ import { measureText } from './postText'
 
 describe('measureText', () => {
   it('counts plain text one per character', () => {
-    expect(measureText('hello')).toEqual({ length: 5, remaining: 275, over: false, empty: false })
+    expect(measureText('hello')).toEqual({
+      length: 5,
+      max: 280,
+      remaining: 275,
+      over: false,
+      empty: false
+    })
   })
 
   it('counts any link as 23, however long', () => {

@@ -1,5 +1,4 @@
 import { randomUUID } from 'node:crypto'
-import twitter from 'twitter-text'
 import type {
   AccountScope,
   DayCounts,
@@ -16,14 +15,20 @@ import type {
   PostsChangedEvent
 } from '@shared/api'
 import { MISSED_AFTER_MS } from '@shared/api'
+import {
+  PLATFORM_RULES,
+  mediaProblem,
+  textLength,
+  type Platform,
+  type PlatformRules
+} from '@shared/platforms'
 import { mediaFromRow, type MediaRow } from '../media/store'
 import { transaction, type Database } from './database'
 import { startOfLocalDay, startOfNextLocalDay, toLocalDate, toUtcIso } from './dates'
 
-/** X's limits: characters are counted the way X counts them (links are 23, emoji 2). */
-export const MAX_PARTS = 25
-export const MAX_WEIGHTED_LENGTH = 280
-const MAX_IMAGES = 4
+/** X's limits, for callers that are only about X. Every platform's are in src/shared/platforms.ts. */
+export const MAX_PARTS = PLATFORM_RULES.x.maxParts
+export const MAX_WEIGHTED_LENGTH = PLATFORM_RULES.x.maxText
 // A post more than this late is missed: the publisher won't send it and approve() refuses it.
 // Shared so the chat card can tell "time passed" the same way.
 export { MISSED_AFTER_MS }
@@ -44,6 +49,8 @@ export interface PostAccounts {
   active(): string | null
   /** Connected and signed in, so a post can be moved to it. */
   canPost(accountId: string): boolean
+  /** The account's platform (OP-118); unknown accounts, and posts without one, follow X's rules. */
+  platform?(accountId: string): Platform | null
 }
 
 export interface ByWhom {
@@ -65,6 +72,7 @@ interface PostRow {
   created_by: PostAuthor
   next_attempt_at: string | null
   autopilot: number
+  reply_to: string | null
 }
 
 interface PartRow {
@@ -125,6 +133,12 @@ export class PostsService {
     this.accounts = accounts
   }
 
+  /** The rules a post for this account has to follow. */
+  private rulesOf(accountId: string | null): PlatformRules {
+    const platform = accountId === null ? null : (this.accounts.platform?.(accountId) ?? null)
+    return PLATFORM_RULES[platform ?? 'x']
+  }
+
   /**
    * Which rows an AccountScope covers: the given account, or the active one when it is left out.
    * Posts with no account (made before any was connected) belong to every account.
@@ -170,11 +184,12 @@ export class PostsService {
    * account has Autopilot on for that author (OP-103).
    */
   create(input: NewPost, { by = 'user' }: ByWhom = {}): Post {
-    const parts = partsOf(input)
+    const accountId = input.accountId ?? this.accounts.active()
+    const rules = this.rulesOf(accountId)
+    const parts = partsOf(input, rules)
     const at = this.now().toISOString()
     const id = randomUUID()
     const scheduledAt = toUtcIso(input.scheduledAt)
-    const accountId = input.accountId ?? this.accounts.active()
     const author = authorOf(by)
     const auto = author !== 'user' && this.autopilot(accountId, author)
     const status: PostStatus = author === 'user' || auto ? 'scheduled' : 'pending_approval'
@@ -182,11 +197,22 @@ export class PostsService {
       this.db
         .prepare(
           `INSERT INTO posts
-             (id, account_id, scheduled_at, status, created_by, created_at, updated_at, autopilot)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+             (id, account_id, scheduled_at, status, created_by, created_at, updated_at, autopilot,
+              reply_to)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
         )
-        .run(id, accountId, scheduledAt, status, author, at, at, auto ? 1 : 0)
-      this.writeParts(id, parts, [])
+        .run(
+          id,
+          accountId,
+          scheduledAt,
+          status,
+          author,
+          at,
+          at,
+          auto ? 1 : 0,
+          input.replyTo ?? null
+        )
+      this.writeParts(id, parts, [], rules)
     })
     this.changed([id])
     return this.require(id)
@@ -322,20 +348,33 @@ export class PostsService {
     }
     const scheduledAt =
       patch.scheduledAt === undefined ? post.scheduledAt : toUtcIso(patch.scheduledAt)
+    const accountId = patch.accountId === undefined ? post.accountId : patch.accountId
+    // A reply answers one comment on one account (OP-124): moved elsewhere it would mean nothing.
+    if (post.replyTo !== null && accountId !== post.accountId) {
+      throw new PostRuleError(
+        'A reply stays on the account whose comment it answers. Write a new post to move it.'
+      )
+    }
+    const rules = this.rulesOf(accountId)
+    const kept = (): NewPostPart[] =>
+      post.parts.map((part) => ({
+        text: part.text,
+        media: part.media.map((m) => ({ id: m.id, alt: m.alt }))
+      }))
     let parts: Part[] | null = null
     if (patch.parts !== undefined) {
-      parts = validParts(patch.parts)
+      parts = validParts(patch.parts, rules)
     } else if (patch.text !== undefined) {
       // Text alone is the single-post shorthand: the first part's text, everything else kept.
       parts = validParts(
-        post.parts.map((part, i) => ({
-          text: i === 0 ? patch.text! : part.text,
-          media: part.media.map((m) => ({ id: m.id, alt: m.alt }))
-        }))
+        kept().map((part, i) => (i === 0 ? { ...part, text: patch.text! } : part)),
+        rules
       )
+    } else if (rules.platform !== this.rulesOf(post.accountId).platform) {
+      // Moved to an account on another platform: the post as it is has to suit that one too.
+      parts = validParts(kept(), rules)
     }
     if (parts) assertPostedPartsKept(post.parts, parts)
-    const accountId = patch.accountId === undefined ? post.accountId : patch.accountId
     if (accountId !== post.accountId && (accountId === null || !this.accounts.canPost(accountId))) {
       throw new PostRuleError('Pick one of your signed-in X accounts for this post')
     }
@@ -367,7 +406,7 @@ export class PostsService {
            WHERE id = ?`
         )
         .run(scheduledAt, status, accountId, this.now().toISOString(), auto ? 1 : 0, status, id)
-      if (parts) removed = this.writeParts(id, parts, post.parts)
+      if (parts) removed = this.writeParts(id, parts, post.parts, rules)
     })
     this.files.removeFiles(removed)
     this.changed([id])
@@ -599,7 +638,12 @@ export class PostsService {
    * Replaces a post's parts inside the caller's transaction. Part ids and the remote ids of parts
    * already on X are kept by position. Returns the files of media no longer attached.
    */
-  private writeParts(postId: string, parts: Part[], before: PostPart[]): string[] {
+  private writeParts(
+    postId: string,
+    parts: Part[],
+    before: PostPart[],
+    rules: PlatformRules
+  ): string[] {
     const attached = this.mediaOf(postId)
     const attachedIds = new Set(attached.map((row) => row.id))
     const kinds = new Map<string, MediaRow['kind']>()
@@ -618,7 +662,8 @@ export class PostsService {
       }
       assertMediaMix(
         i,
-        part.media.map((m) => kinds.get(m.id)!)
+        part.media.map((m) => kinds.get(m.id)!),
+        rules
       )
     })
 
@@ -712,6 +757,7 @@ export class PostsService {
         nextAttemptAt: row.next_attempt_at,
         createdBy: row.created_by,
         autopilot: row.autopilot === 1,
+        replyTo: row.reply_to,
         text: postParts[0]?.text ?? '',
         parts: postParts,
         scheduledAt: row.scheduled_at,
@@ -728,17 +774,21 @@ export class PostsService {
   }
 }
 
-function partsOf(input: NewPost): Part[] {
+function partsOf(input: NewPost, rules: PlatformRules): Part[] {
   if (input.parts !== undefined && input.text !== undefined) {
     throw new PostRuleError('Give either text or parts, not both')
   }
-  return validParts(input.parts ?? [{ text: input.text as string }])
+  return validParts(input.parts ?? [{ text: input.text as string }], rules)
 }
 
-function validParts(parts: NewPostPart[]): Part[] {
+function validParts(parts: NewPostPart[], rules: PlatformRules): Part[] {
   if (!Array.isArray(parts) || parts.length === 0) throw new PostRuleError('A post needs some text')
-  if (parts.length > MAX_PARTS) {
-    throw new PostRuleError(`A thread can have at most ${MAX_PARTS} posts`)
+  if (parts.length > rules.maxParts) {
+    throw new PostRuleError(
+      rules.maxParts === 1
+        ? `A ${rules.name} post can't be a thread`
+        : `A thread can have at most ${rules.maxParts} posts`
+    )
   }
   return parts.map((part, i) => {
     const text = typeof part?.text === 'string' ? part.text : ''
@@ -747,28 +797,30 @@ function validParts(parts: NewPostPart[]): Part[] {
       alt: typeof m.alt === 'string' && m.alt.trim() ? m.alt.trim() : null
     }))
     const where = parts.length > 1 ? `Post ${i + 1} of the thread` : 'The post'
+    if (rules.videoRequired && media.length === 0) {
+      throw new PostRuleError(`A ${rules.name} post needs a video`)
+    }
     if (text.trim() === '' && media.length === 0) {
       throw new PostRuleError(
         parts.length > 1 ? `${where} needs text or media` : 'A post needs some text'
       )
     }
-    const length = twitter.parseTweet(text).weightedLength
-    if (length > MAX_WEIGHTED_LENGTH) {
-      throw new PostRuleError(`${where} is ${length} characters; X allows ${MAX_WEIGHTED_LENGTH}`)
+    const length = textLength(rules, text)
+    if (length > rules.maxText) {
+      throw new PostRuleError(
+        `${where} is ${length} characters; ${rules.name} allows ${rules.maxText}`
+      )
     }
     return { text, media }
   })
 }
 
-/** Up to 4 images, or one GIF, or one video: X refuses any mix. */
-function assertMediaMix(index: number, kinds: MediaRow['kind'][]): void {
-  const where = `Part ${index + 1}`
-  const images = kinds.filter((k) => k === 'image').length
-  const others = kinds.length - images
-  if (others > 0 && kinds.length > 1) {
-    throw new PostRuleError(`${where}: a GIF or video has to be the only media in its post`)
-  }
-  if (images > MAX_IMAGES) throw new PostRuleError(`${where}: X allows up to ${MAX_IMAGES} images`)
+/** The media on one part suits the platform: on X up to 4 images, or one GIF, or one video. */
+function assertMediaMix(index: number, kinds: MediaRow['kind'][], rules: PlatformRules): void {
+  // No media at all is validParts' to judge, together with the text.
+  if (kinds.length === 0) return
+  const problem = mediaProblem(rules, kinds)
+  if (problem) throw new PostRuleError(`Part ${index + 1}: ${problem}`)
 }
 
 /** Parts already on X (a thread that failed halfway) can't change, only what comes after them. */

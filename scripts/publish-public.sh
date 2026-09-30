@@ -43,6 +43,11 @@ grep -rInE "$SECRETS" "$TREE" --exclude=pnpm-lock.yaml && hit "something that lo
 NAME="ot""to"
 grep -rIniw "$NAME" "$TREE" && hit "the inspiration's name"
 grep -rIn '/Users/[a-z]' "$TREE" | grep -vE "/Users/(me|u)(/|'|\`)" && hit "a real local path"
+# The public site is static files only (OP-131): nothing that runs or holds data.
+[ -d "$TREE/site" ] && ( cd "$TREE/site" && find . -type f ! \( -name '*.html' -o -name '*.css' \
+  -o -name '*.js' -o -name '*.svg' -o -name '*.png' -o -name '*.jpg' -o -name '*.webp' \
+  -o -name '*.ico' -o -name '*.woff2' -o -name '*.txt' \) -print | grep . ) &&
+  hit "site/ has a file that isn't a static page, style, script, image or font"
 grep -q 'RELEASE_REPO=${OPENCATT_FFMPEG_REPO:-'"$PUBLIC_REPO}" "$TREE/scripts/ffmpeg/fetch.sh" ||
   hit "fetch.sh doesn't point at $PUBLIC_REPO"
 grep -q "\"repository\": \"github:$PUBLIC_REPO\"" "$TREE/package.json" ||

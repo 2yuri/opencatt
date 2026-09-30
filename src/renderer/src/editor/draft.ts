@@ -1,9 +1,15 @@
 import type { NewPostPart, Post, PostMedia } from '@shared/api'
+import {
+  PLATFORM_RULES,
+  mediaProblem as platformMediaProblem,
+  type PlatformRules
+} from '@shared/platforms'
 import { measureText } from './postText'
 
-// The same limits PostsService enforces, checked here so the user sees them before saving.
-export const MAX_PARTS = 25
-export const MAX_IMAGES = 4
+// The same limits PostsService enforces (src/shared/platforms.ts), checked here so the user sees
+// them before saving.
+export const MAX_PARTS = PLATFORM_RULES.x.maxParts
+export const MAX_IMAGES = PLATFORM_RULES.x.maxImages
 
 /** One part of the post while it's being edited. */
 export interface DraftPart {
@@ -41,25 +47,39 @@ export function toPayload(parts: DraftPart[]): NewPostPart[] {
   }))
 }
 
-/** Why this set of media can't go on one post, or null when X accepts it. */
-export function mediaProblem(media: Pick<PostMedia, 'kind'>[]): string | null {
-  const images = media.filter((m) => m.kind === 'image').length
-  if (media.length > 1 && media.some((m) => m.kind !== 'image')) {
-    return 'A GIF or video has to be the only media in its post.'
-  }
-  if (images > MAX_IMAGES) return `X allows up to ${MAX_IMAGES} images per post.`
-  return null
+/**
+ * Why this set of media can't go on one post, or null when the platform accepts it. An empty set
+ * passes here: a post with no media at all is partProblem's to judge, with the text.
+ */
+export function mediaProblem(
+  media: Pick<PostMedia, 'kind'>[],
+  rules: PlatformRules = PLATFORM_RULES.x
+): string | null {
+  if (media.length === 0) return null
+  const problem = platformMediaProblem(
+    rules,
+    media.map((m) => m.kind)
+  )
+  return problem ? `${problem[0].toUpperCase()}${problem.slice(1)}.` : null
 }
 
 /** The first problem in a part, worded for the thread or the single post. */
-export function partProblem(part: DraftPart, index: number, count: number): string | null {
+export function partProblem(
+  part: DraftPart,
+  index: number,
+  count: number,
+  rules: PlatformRules = PLATFORM_RULES.x
+): string | null {
   const where = count > 1 ? `Post ${index + 1} of the thread` : 'The post'
-  const measure = measureText(part.text)
+  const measure = measureText(part.text, rules)
+  if (rules.videoRequired && !part.media.some((m) => m.kind === 'video')) {
+    return `A ${rules.name} post needs a video.`
+  }
   if (measure.empty && part.media.length === 0) {
     return count > 1 ? `${where} needs text or media.` : 'Write something first.'
   }
-  if (measure.over) return `${where} is ${-measure.remaining} over the 280 limit.`
-  const media = mediaProblem(part.media)
+  if (measure.over) return `${where} is ${-measure.remaining} over the ${measure.max} limit.`
+  const media = mediaProblem(part.media, rules)
   return media ? `${where}: ${media}` : null
 }
 

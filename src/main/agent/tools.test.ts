@@ -5,6 +5,7 @@ import { PostsService } from '../db'
 import { MediaStore } from '../media/store'
 import { fakeMedia, tempDir } from '../media/testFiles'
 import { openDatabase } from '../db/database'
+import { PLATFORM_RULES } from '@shared/platforms'
 import { localIso, namedAccounts, postTools, runTool, type ToolAccounts } from './tools'
 
 // Tests run in Europe/Lisbon: WEST (+01:00) until 25 Oct 2026, then WET (+00:00).
@@ -518,8 +519,101 @@ describe('tools per X account', () => {
 
     switchTo('B')
     expect(body(run('list_accounts', {}))['accounts']).toEqual([
-      { handle: '@alpha', name: 'Alpha', active: false },
-      { handle: '@Beta', name: null, active: true }
+      { handle: '@alpha', name: 'Alpha', platform: 'X', active: false },
+      { handle: '@Beta', name: null, platform: 'X', active: true }
     ])
+  })
+})
+
+describe('tools on a TikTok account (OP-122)', () => {
+  function tiktok() {
+    const db = openDatabase(':memory:')
+    const source = tempDir('opencat-src-')
+    const media = new MediaStore(
+      db,
+      join(tempDir(), 'media'),
+      () => null,
+      () => NOW
+    )
+    const posts = new PostsService(db, () => NOW, media)
+    posts.useAccounts({ active: () => 'T', canPost: () => true, platform: () => 'tiktok' })
+    const given = new Set<string>()
+    const tools = postTools(
+      posts,
+      () => NOW,
+      'agent',
+      () => given,
+      {
+        forCall: () => 'T',
+        rules: () => PLATFORM_RULES.tiktok
+      }
+    )
+    const add = (id: string): string => {
+      given.add(id)
+      return id
+    }
+    return {
+      posts,
+      run: (name: string, input: unknown) => runTool(tools, name, input),
+      video: () =>
+        add(
+          media.import(fakeMedia(source, 'clip.mp4'), {
+            width: 1080,
+            height: 1920,
+            durationMs: 15_000,
+            owned: true
+          }).id
+        ),
+      image: () => add(media.import(fakeMedia(source, 'a.png')).id)
+    }
+  }
+  const at = '2026-09-29T09:00:00+01:00'
+
+  it('refuses a text-only post and says how to make the video', () => {
+    const { run } = tiktok()
+    const out = run('create_posts', { posts: [{ text: 'Hi', scheduled_at: at }] })
+    expect(out.isError).toBe(true)
+    expect(body(out)['error']).toContain('a TikTok post needs a video. Make one with render_video')
+    expect(body(out)['error']).toContain('1080x1920')
+  })
+
+  it('refuses a thread', () => {
+    const { run, video } = tiktok()
+    const out = run('create_posts', {
+      posts: [
+        {
+          parts: [{ text: 'one', media: [{ id: video() }] }, { text: 'two' }],
+          scheduled_at: at
+        }
+      ]
+    })
+    expect(body(out)['error']).toContain("a TikTok post can't be a thread")
+  })
+
+  it('takes one video with a long caption counted as TikTok counts it', () => {
+    const { run, video, posts } = tiktok()
+    const caption = `${'Three terminal tricks you should know. '.repeat(20)}#dev #cli`
+    expect(caption.length).toBeGreaterThan(280)
+    const out = run('create_posts', {
+      posts: [{ parts: [{ text: caption, media: [{ id: video() }] }], scheduled_at: at }]
+    })
+    expect(out.isError).toBe(false)
+    expect(posts.listByDay('2026-09-29')[0]!.parts[0]!.media[0]!.kind).toBe('video')
+
+    const tooLong = run('create_posts', {
+      posts: [{ parts: [{ text: 'x'.repeat(2201), media: [{ id: video() }] }], scheduled_at: at }]
+    })
+    expect(body(tooLong)['error']).toContain("TikTok's 2200 characters")
+  })
+
+  it('refuses an image in place of the video, and list_posts names the platform', () => {
+    const { run, image } = tiktok()
+    const out = run('create_posts', {
+      posts: [{ parts: [{ text: 'pic', media: [{ id: image() }] }], scheduled_at: at }]
+    })
+    expect(out.isError).toBe(true)
+    expect(body(out)['error']).toContain('TikTok')
+    const listed = body(run('list_posts', { from: '2026-09-29', to: '2026-09-29' }))
+    expect(listed['platform']).toBe('TikTok')
   })
 })

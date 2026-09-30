@@ -27,10 +27,26 @@ function setup(port = 0) {
 }
 
 describe('McpManager', () => {
+  it("a test build's server runs on its own port, in the commands and the status (OP-134)", async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'opencat-mcp-'))
+    const settings = new SettingsStore(openDatabase(':memory:'))
+    const server = new McpHttpServer({ tools: [], token: () => manager.token(), port: 0 })
+    const manager: McpManager = new McpManager(server, settings, {
+      connectionFile: join(dir, 'mcp.json'),
+      exe: 'electron',
+      bridge: 'mcp-bridge.js',
+      port: 47899
+    })
+    managers.push(manager)
+    const on = await manager.setEnabled(true)
+    expect(on.port).toBe(47899)
+    expect(on.claudeCode).toContain('http://127.0.0.1:47899/mcp')
+  })
+
   it('is off by default and starts only when turned on', async () => {
     const { manager, server } = setup()
     await manager.restore()
-    expect(manager.status()).toEqual({ enabled: false, running: false, error: null })
+    expect(manager.status()).toEqual({ enabled: false, running: false, error: null, port: 47824 })
     expect(server.running).toBe(false)
 
     const on = await manager.setEnabled(true)

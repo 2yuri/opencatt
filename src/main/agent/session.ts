@@ -10,6 +10,7 @@ import type {
   ToolResult,
   VoiceProfile
 } from '@shared/api'
+import type { Platform } from '@shared/platforms'
 import type { ChatStore } from '../db'
 
 /** A failure the chat panel can explain to the user. Anything else is reported as "other". */
@@ -33,6 +34,8 @@ export interface TurnAccount {
   voice?: VoiceProfile
   /** Autopilot is on for the agent here (OP-103): its posts are scheduled without approval. */
   autopilot?: boolean
+  /** The platform it is on (OP-118); X when left out. The prompt follows its rules (OP-122). */
+  platform?: Platform
 }
 
 /**

@@ -15,6 +15,7 @@ describe('migrations', () => {
       'accounts',
       'chat_messages',
       'chat_sessions',
+      'comments',
       'post_media',
       'post_parts',
       'post_stats',
@@ -329,5 +330,57 @@ describe('migration 11: next_attempt_at', () => {
     })
     expect(db.prepare('SELECT COUNT(*) AS n FROM post_parts').get()).toEqual({ n: 2 })
     expect(db.prepare('SELECT part_id FROM post_media').get()).toEqual({ part_id: 'p1' })
+  })
+})
+
+describe('migration 18: accounts.platform', () => {
+  it('makes every existing account an X account and changes nothing else', () => {
+    const db = new DatabaseSync(':memory:')
+    db.exec('PRAGMA foreign_keys = ON')
+    migrate(db, 17)
+    db.exec(`
+      INSERT INTO accounts (id, handle, name, avatar_url, mode, needs_reconnect, added_at, updated_at)
+        VALUES ('111', 'alice', 'Alice', 'https://a/x.png', 'oauth2', 0, 'then', 'then'),
+               ('222', 'bob', NULL, NULL, 'oauth1', 1, 'then', 'then');
+      INSERT INTO posts (id, scheduled_at, status, created_by, created_at, updated_at, account_id)
+        VALUES ('p', '2026-09-28T08:00:00.000Z', 'posted', 'user', 'now', 'now', '111');
+      INSERT INTO post_parts (id, post_id, position, text, remote_id) VALUES ('p0', 'p', 0, 'first', 'r0'), ('p1', 'p', 1, 'second', 'r1');
+      INSERT INTO post_media (id, part_id, position, kind, file, mime, bytes, created_at)
+        VALUES ('m', 'p1', 0, 'image', 'm.png', 'image/png', 1, 'now');
+      INSERT INTO post_stats (remote_id, account_id, post_id, text, posted_at, impressions, synced_at)
+        VALUES ('r0', '111', 'p', 'first', 'now', 42, 'now');
+    `)
+    const before = (sql: string) => db.prepare(sql).all()
+    const posts = before('SELECT * FROM posts')
+    const parts = before('SELECT * FROM post_parts ORDER BY id')
+    const media = before('SELECT * FROM post_media')
+    const stats = before('SELECT * FROM post_stats')
+
+    migrate(db, 18)
+
+    expect(schemaVersion(db)).toBe(18)
+    expect(
+      db.prepare('SELECT id, platform, handle, needs_reconnect FROM accounts ORDER BY id').all()
+    ).toEqual([
+      { id: '111', platform: 'x', handle: 'alice', needs_reconnect: 0 },
+      { id: '222', platform: 'x', handle: 'bob', needs_reconnect: 1 }
+    ])
+    expect(before('SELECT * FROM posts')).toEqual(posts)
+    expect(before('SELECT * FROM post_parts ORDER BY id')).toEqual(parts)
+    expect(before('SELECT * FROM post_media')).toEqual(media)
+    expect(before('SELECT * FROM post_stats')).toEqual(stats)
+  })
+
+  it('takes x and tiktok and refuses any other platform', () => {
+    const db = openDatabase(':memory:')
+    const add = (id: string, platform: string) => () =>
+      db
+        .prepare(
+          `INSERT INTO accounts (id, platform, handle, mode, added_at, updated_at)
+           VALUES (?, ?, 'h', 'oauth2', 'now', 'now')`
+        )
+        .run(id, platform)
+    expect(add('tiktok:1', 'tiktok')).not.toThrow()
+    expect(add('3', 'myspace')).toThrow()
   })
 })

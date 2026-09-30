@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import twitter from 'twitter-text'
+import { PLATFORM_RULES, type Platform } from '@shared/platforms'
 import type {
   JsonValue,
   Post,
@@ -45,6 +46,8 @@ export interface StatsDeps {
   /** The X account the dashboard shows. */
   activeAccount: () => string | null
   readTimeline: (accountId: string, max: number) => Promise<TimelinePost[]>
+  /** The account's platform (OP-118); X when unknown. Only X's stats are read here. */
+  platformOf?: (accountId: string) => Platform | null
   onChanged?: (accountId: string | null) => void
   now?: () => Date
 }
@@ -174,6 +177,10 @@ export class StatsService {
   private async runSync(): Promise<StatsSyncResult> {
     const accountId = this.deps.activeAccount()
     if (!accountId) throw new Error('Connect an X account to read its stats.')
+    const platform = this.deps.platformOf?.(accountId) ?? 'x'
+    if (platform !== 'x') {
+      throw new Error(`OpenCatt doesn't read ${PLATFORM_RULES[platform].name} stats yet.`)
+    }
     let posts: TimelinePost[]
     try {
       posts = await this.deps.readTimeline(accountId, SYNC_POSTS)
@@ -382,7 +389,7 @@ export class StatsService {
     const row = this.deps.db
       .prepare(
         `SELECT sync_id, MAX(at) AS at, SUM(dollars) AS spent FROM x_costs
-         WHERE account_id = ? AND kind = 'read'
+         WHERE account_id = ? AND kind = 'read' AND source = 'stats'
          GROUP BY sync_id ORDER BY MAX(rowid) DESC LIMIT 1`
       )
       .get(accountId) as { at: string; spent: number } | undefined
@@ -437,7 +444,7 @@ export class StatsService {
     const rows = this.deps.db
       .prepare(
         `SELECT remote_id, kind, SUM(dollars) AS dollars, MAX(estimated) AS estimated
-         FROM x_costs WHERE account_id = ? AND remote_id IS NOT NULL
+         FROM x_costs WHERE account_id = ? AND remote_id IS NOT NULL AND source = 'stats'
          GROUP BY remote_id, kind`
       )
       .all(accountId) as unknown as {

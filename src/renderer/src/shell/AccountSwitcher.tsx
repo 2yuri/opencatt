@@ -4,6 +4,7 @@ import type { AuthStatus, XAccount } from '@shared/api'
 import { authErrorMessage } from '@shared/authErrors'
 import { AutopilotBadge } from '../autopilot/AutopilotBadge'
 import { useAutopilot } from '../autopilot/useAutopilot'
+import { PlatformMark, handleLine } from './PlatformMark'
 
 // One gradient per account, by its place in the list of accounts, so it keeps its colour everywhere.
 const GRADIENTS = [
@@ -23,8 +24,37 @@ function accountName(account: XAccount): string {
   return account.name || `@${account.handle}`
 }
 
-/** The account's X picture, or its first letter on a gradient; `index` is its place in the list. */
+/**
+ * The account's picture, or its first letter on a gradient; `index` is its place in the list.
+ * With `badge`, its platform's mark sits on the corner (OP-118).
+ */
 export function Avatar({
+  account,
+  index,
+  size,
+  badge = false
+}: {
+  account: XAccount
+  index: number
+  size: number
+  badge?: boolean
+}): React.JSX.Element {
+  if (!badge) return <AvatarImage account={account} index={index} size={size} />
+  return (
+    <span className="relative inline-flex shrink-0" data-testid="avatar-with-platform">
+      <AvatarImage account={account} index={index} size={size} />
+      <span className="absolute -right-[3px] -bottom-[3px] inline-flex">
+        <PlatformMark
+          platform={account.platform}
+          size={Math.min(14, Math.round(size * 0.5))}
+          ring
+        />
+      </span>
+    </span>
+  )
+}
+
+function AvatarImage({
   account,
   index,
   size
@@ -124,7 +154,7 @@ export function AccountSwitcher({
         onClick={() => setOpen((was) => !was)}
       >
         <span className="relative shrink-0">
-          <Avatar account={active} index={status.accounts.indexOf(active)} size={26} />
+          <Avatar account={active} index={status.accounts.indexOf(active)} size={26} badge />
           {rail && elsewhere > 0 && (
             <span
               className="absolute -top-[5px] left-[17px] grid h-[15px] min-w-[15px] place-items-center rounded-[8px] bg-ds-amber px-[3px] text-[9px] leading-none font-bold text-[#1A1206]"
@@ -145,7 +175,7 @@ export function AccountSwitcher({
                 </span>
                 {autopilot.on && <AutopilotBadge />}
               </span>
-              <span className="text-[11px] text-ds-text-3">@{active.handle}</span>
+              <span className="text-[11px] text-ds-text-3">{handleLine(active)}</span>
             </span>
             {elsewhere > 0 && (
               <span
@@ -170,7 +200,7 @@ type Connecting =
 
 const ADD = 'add'
 
-/** The menu of X accounts, opened above the switcher. Arrow keys move between its items. */
+/** The menu of accounts on every platform, opened above the switcher. Arrow keys move between its items. */
 function AccountMenu({
   status,
   activeId,
@@ -243,14 +273,14 @@ function AccountMenu({
       ref={menuRef}
       className="absolute bottom-[calc(100%+6px)] left-0 z-50 box-border flex w-[256px] flex-col gap-[2px] rounded-[12px] border border-ds-border-strong bg-ds-surface p-[6px] shadow-[0_12px_32px_#00000080]"
       role="menu"
-      aria-label="X accounts"
+      aria-label="Accounts"
       onKeyDown={onKeyDown}
     >
       <div
         className="px-[8px] pt-[6px] pb-[4px] text-[10px] font-semibold tracking-[0.8px] text-ds-text-3"
         aria-hidden="true"
       >
-        X ACCOUNTS
+        ACCOUNTS
       </div>
       {status.accounts.map((account, i) => {
         const current = account.id === activeId
@@ -269,7 +299,7 @@ function AccountMenu({
                 aria-checked={current}
                 onClick={() => choose(account.id)}
               >
-                <Avatar account={account} index={i} size={28} />
+                <Avatar account={account} index={i} size={28} badge />
                 <span className="flex min-w-0 flex-1 flex-col [&>*]:truncate">
                   <span className="text-[13px] font-medium text-ds-text">
                     {accountName(account)}
@@ -277,7 +307,7 @@ function AccountMenu({
                   {account.needsReconnect ? (
                     <span className="text-[11px] text-ds-red">Needs reconnecting</span>
                   ) : (
-                    <span className="text-[11px] text-ds-text-3">@{account.handle}</span>
+                    <span className="text-[11px] text-ds-text-3">{handleLine(account)}</span>
                   )}
                 </span>
                 {waiting > 0 && <CountPill count={waiting} label={`${waiting} waiting`} />}

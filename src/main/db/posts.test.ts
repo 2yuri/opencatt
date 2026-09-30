@@ -331,6 +331,49 @@ describe('threads and media', () => {
     expect(posts.listByDay('2026-09-28')[0]).toEqual(post)
   })
 
+  describe('on a TikTok account (OP-118)', () => {
+    const tiktok = 'tiktok:abc'
+    beforeEach(() => {
+      posts.useAccounts({
+        active: () => tiktok,
+        canPost: () => true,
+        platform: (id) => (id === tiktok ? 'tiktok' : 'x')
+      })
+    })
+
+    it('takes one video with a caption up to 2200 characters', () => {
+      const video = media.import(fakeMedia(source, 'clip.mp4'))
+      const post = posts.create({
+        scheduledAt: at,
+        parts: [{ text: 'a'.repeat(2200), media: [{ id: video.id }] }]
+      })
+      expect(post.accountId).toBe(tiktok)
+      expect(post.parts[0].media.map((m) => m.kind)).toEqual(['video'])
+    })
+
+    it('refuses text-only posts, images, GIFs, threads and long captions', () => {
+      const video = media.import(fakeMedia(source, 'clip.mp4'))
+      const gif = media.import(fakeMedia(source, 'a.gif'))
+      const create = (parts: NewPostPart[]) => () => posts.create({ scheduledAt: at, parts })
+
+      expect(create([{ text: 'just words' }])).toThrow(/TikTok post needs a video/)
+      expect(create([{ text: 'pic', media: [{ id: image().id }] }])).toThrow(/can't have images/)
+      expect(create([{ text: 'gif', media: [{ id: gif.id }] }])).toThrow(/doesn't take GIFs/)
+      expect(create([{ text: 'one', media: [{ id: video.id }] }, { text: 'two' }])).toThrow(
+        /can't be a thread/
+      )
+      expect(create([{ text: 'a'.repeat(2201), media: [{ id: video.id }] }])).toThrow(
+        /2201 characters; TikTok allows 2200/
+      )
+    })
+
+    it('checks an X post moved to a TikTok account against TikTok', () => {
+      const post = posts.create({ accountId: 'x-1', text: 'Hello X', scheduledAt: at })
+      expect(() => posts.update(post.id, { accountId: tiktok })).toThrow(/needs a video/)
+      expect(posts.get(post.id)!.accountId).toBe('x-1')
+    })
+  })
+
   it("refuses what X won't take", () => {
     const imgs = [1, 2, 3, 4, 5].map((n) => image(`${n}.png`))
     const gif = media.import(fakeMedia(source, 'a.gif'))

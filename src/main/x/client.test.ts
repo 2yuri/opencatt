@@ -50,6 +50,7 @@ const post = (parts: PostPart[], accountId: string | null = 'acct'): Post => ({
   accountId,
   createdBy: 'user',
   autopilot: false,
+  replyTo: null,
   text: parts[0]!.text,
   parts,
   scheduledAt: '2026-09-28T09:00:00.000Z',
@@ -557,5 +558,75 @@ describe('XClient.readTimeline (OP-109)', () => {
     expect(url.pathname).toBe('/2/users/123/tweets')
     expect(url.searchParams.get('max_results')).toBe('100')
     expect(url.searchParams.get('exclude')).toBe('retweets')
+  })
+})
+
+describe('XClient replies to comments (OP-124)', () => {
+  it('sends the first part as a reply to the comment, and the rest as a thread under it', async () => {
+    const t = setup()
+    const reply = { ...post([part(0), part(1)]), replyTo: '777' }
+    await t.client.publish(reply, t.onPart)
+    expect(t.calls.map((c) => c.body)).toEqual([
+      { text: 'part 0', reply: { in_reply_to_tweet_id: '777' } },
+      { text: 'part 1', reply: { in_reply_to_tweet_id: '1001' } }
+    ])
+  })
+
+  it('reads mentions with their thread and author, since the last one seen', async () => {
+    const t = setup({
+      answers: {
+        '/2/users/acct/mentions': [
+          () =>
+            json(200, {
+              data: [
+                {
+                  id: '5002',
+                  text: '@acme love it',
+                  created_at: '2026-09-30T10:00:00.000Z',
+                  author_id: 'u9',
+                  conversation_id: '900',
+                  referenced_tweets: [{ type: 'replied_to', id: '900' }]
+                },
+                { id: '5001', text: 'no author', conversation_id: '900' }
+              ],
+              includes: { users: [{ id: 'u9', username: 'fan', name: 'A Fan' }] }
+            })
+        ]
+      }
+    })
+    const read = await t.client.readMentions('acct', '4999')
+    expect(read).toEqual({
+      users: 1,
+      more: false,
+      mentions: [
+        {
+          id: '5002',
+          text: '@acme love it',
+          createdAt: '2026-09-30T10:00:00.000Z',
+          conversationId: '900',
+          inReplyTo: '900',
+          author: { id: 'u9', handle: 'fan', name: 'A Fan' }
+        }
+      ]
+    })
+    const url = new URL(t.calls[0]!.url)
+    expect(url.searchParams.get('since_id')).toBe('4999')
+    expect(url.searchParams.get('max_results')).toBe('100')
+    expect(url.searchParams.get('expansions')).toBe('author_id')
+  })
+
+  it('says when X has another page, and reads older than until_id to fill a gap', async () => {
+    const t = setup({
+      answers: {
+        '/2/users/acct/mentions': [
+          () => json(200, { data: [], meta: { result_count: 0, next_token: 'abc' } })
+        ]
+      }
+    })
+    const read = await t.client.readMentions('acct', '4999', '5100')
+    expect(read.more).toBe(true)
+    const url = new URL(t.calls[0]!.url)
+    expect(url.searchParams.get('until_id')).toBe('5100')
+    expect(url.searchParams.get('since_id')).toBe('4999')
   })
 })

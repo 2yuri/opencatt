@@ -155,7 +155,8 @@ describe('IntegrationsScreen, X accounts', () => {
   it('lists each account with whether it is connected', async () => {
     renderScreen(withAccounts)
     await screen.findByRole('group', { name: 'Acme' })
-    expect(row('Acme').textContent).toContain('@acme')
+    expect(row('Acme').textContent).toContain('@acme · X')
+    expect(within(row('Acme')).getByRole('img', { name: 'X' })).toBeTruthy()
     expect(within(row('Acme')).getByText('Connected')).toBeTruthy()
     expect(within(row('Maria Souza')).getByText('Connected')).toBeTruthy()
     expect(within(row('Side project')).getByText('Needs reconnecting')).toBeTruthy()
@@ -165,6 +166,18 @@ describe('IntegrationsScreen, X accounts', () => {
     expect(screen.getAllByRole('button', { name: 'Disconnect' })).toHaveLength(3)
     expect(screen.queryByText('No X account connected yet.')).toBeNull()
     expect(screen.getByRole('button', { name: 'Add an X account' })).toBeTruthy()
+  })
+
+  it('shows a TikTok account as TikTok (OP-118)', async () => {
+    renderScreen((fake) =>
+      Object.assign(fake.authStatus, {
+        accounts: [xAccount('acme.hq', { id: 'tiktok:1', platform: 'tiktok', name: 'Acme' })],
+        activeAccountId: 'tiktok:1'
+      })
+    )
+    await screen.findByRole('group', { name: 'Acme' })
+    expect(row('Acme').textContent).toContain('@acme.hq · TikTok')
+    expect(within(row('Acme')).getByRole('img', { name: 'TikTok' })).toBeTruthy()
   })
 
   it('reconnects through X sign-in and says why it failed', async () => {

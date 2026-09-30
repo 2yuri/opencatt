@@ -89,6 +89,20 @@ const api: OpenCatApi = {
     setPrePrompt: (text) => ipcRenderer.invoke(IpcChannel.VideoPrePromptSet, text),
     resetPrePrompt: () => ipcRenderer.invoke(IpcChannel.VideoPrePromptReset)
   },
+  comments: {
+    estimate: () => ipcRenderer.invoke(IpcChannel.CommentsEstimate),
+    refresh: () => ipcRenderer.invoke(IpcChannel.CommentsRefresh),
+    list: () => ipcRenderer.invoke(IpcChannel.CommentsList),
+    lastRefresh: () => ipcRenderer.invoke(IpcChannel.CommentsLastRefresh),
+    markRead: (remoteIds) => ipcRenderer.invoke(IpcChannel.CommentsMarkRead, remoteIds),
+    reply: (remoteId, reply) => ipcRenderer.invoke(IpcChannel.CommentsReply, remoteId, reply),
+    onChanged: (listener) => {
+      const handler = (_e: IpcRendererEvent, event: { accountId: string | null }): void =>
+        listener(event)
+      ipcRenderer.on(IpcEvent.CommentsChanged, handler)
+      return () => ipcRenderer.off(IpcEvent.CommentsChanged, handler)
+    }
+  },
   stats: {
     estimate: () => ipcRenderer.invoke(IpcChannel.StatsEstimate),
     sync: () => ipcRenderer.invoke(IpcChannel.StatsSync),

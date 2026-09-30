@@ -83,5 +83,13 @@ describe('Autopilot (OP-103)', () => {
       'Autopilot is on for this account'
     )
     expect(accountNote({ handle: 'a', name: null })).not.toContain('Autopilot')
+
+    // A TikTok account gets TikTok's rules after the X writing guide (OP-122).
+    const tiktok = accountNote({ handle: 'a', name: null, platform: 'tiktok' })
+    expect(tiktok).toContain('You are writing for the TikTok account @a.')
+    expect(tiktok).toContain('Every post is one video with a caption.')
+    expect(tiktok).toContain('1080x1920')
+    expect(accountNote({ handle: 'a', name: null })).toContain('the X account @a.')
+    expect(accountNote({ handle: 'a', name: null })).not.toContain('TikTok')
   })
 })

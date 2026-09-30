@@ -21,6 +21,7 @@ let publisher: Publisher
 
 const alice: XAccount = {
   id: 'alice',
+  platform: 'x',
   handle: 'alice',
   name: null,
   avatarUrl: null,
@@ -377,6 +378,31 @@ describe('Publisher', () => {
       error: 'Connect an X account to post this.'
     })
     expect(signedOut).toEqual([])
+  })
+
+  it('fails a post for a platform OpenCatt can’t post to yet, without sending or retrying (OP-118)', async () => {
+    const tiktok: XAccount = { ...alice, id: 'tiktok:1', platform: 'tiktok', handle: 'tt' }
+    const other = vi.fn(ok)
+    publisher = build({
+      account: (id) => (id === 'alice' ? alice : id === tiktok.id ? tiktok : null),
+      publishers: { tiktok: other as unknown as PublisherDeps['publish'] }
+    })
+    const post = posts.create({
+      text: 'hello',
+      scheduledAt: '2026-09-28T08:59:00Z',
+      accountId: tiktok.id
+    })
+    const onX = create('2026-09-28T08:59:00Z')
+    await publisher.start()
+
+    expect(posts.get(post.id)).toMatchObject({
+      status: 'failed',
+      errorCode: 'rejected',
+      error: "OpenCatt can't post to TikTok yet."
+    })
+    expect(other).not.toHaveBeenCalled()
+    expect(publish).toHaveBeenCalledTimes(1)
+    expect(posts.get(onX.id)?.status).toBe('posted')
   })
 
   it('never sends a post edited or claimed since it was listed', async () => {

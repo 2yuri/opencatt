@@ -1,9 +1,13 @@
-import twitter from 'twitter-text'
 import type { NewPartMedia, NewPostPart, Post, PostAuthor, ToolResult } from '@shared/api'
 import type { ModelImage } from './images'
 import { PostRuleError, type PostsService } from '../db'
-import { MAX_PARTS, MAX_WEIGHTED_LENGTH } from '../db/posts'
+import { PLATFORM_RULES, textLength, type PlatformRules } from '@shared/platforms'
 import { startOfLocalDay } from '../db/dates'
+
+// Each call follows its account's platform (OP-122); these are only the schema's outer bounds.
+const X = PLATFORM_RULES.x
+const TIKTOK = PLATFORM_RULES.tiktok
+const MAX_PARTS = Math.max(...Object.values(PLATFORM_RULES).map((r) => r.maxParts))
 
 const MAX_CREATE = 10
 const MAX_LIST_DAYS = 62
@@ -43,29 +47,34 @@ export class ToolInputError extends Error {
 const ISO_WITH_OFFSET = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:\d{2})$/
 const LOCAL_DATE = /^\d{4}-\d{2}-\d{2}$/
 
-function object(input: unknown): Record<string, unknown> {
+export function object(input: unknown): Record<string, unknown> {
   if (typeof input !== 'object' || input === null || Array.isArray(input)) {
     throw new ToolInputError('Input must be an object')
   }
   return input as Record<string, unknown>
 }
 
-function string(value: unknown, field: string): string {
+export function string(value: unknown, field: string): string {
   if (typeof value !== 'string' || value.trim() === '') {
     throw new ToolInputError(`${field} must be a non-empty string`)
   }
   return value
 }
 
-function postText(value: unknown, field: string, optional = false): string {
+export function postText(
+  value: unknown,
+  field: string,
+  optional = false,
+  rules: PlatformRules = X
+): string {
   if (optional && (value === undefined || value === '')) return ''
   const text = string(value, field).trim()
-  // The same count PostsService enforces (links are 23, emoji 2), checked up front so a batch
-  // is refused whole rather than half created.
-  const length = twitter.parseTweet(text).weightedLength
-  if (length > MAX_WEIGHTED_LENGTH) {
+  // The same count PostsService enforces for the platform (on X a link is 23, an emoji 2),
+  // checked up front so a batch is refused whole rather than half created.
+  const length = textLength(rules, text)
+  if (length > rules.maxText) {
     throw new ToolInputError(
-      `${field} counts ${length} of X's ${MAX_WEIGHTED_LENGTH} characters. Shorten it.`
+      `${field} counts ${length} of ${rules.name}'s ${rules.maxText} characters. Shorten it.`
     )
   }
   return text
@@ -78,6 +87,8 @@ export interface ToolAccount {
   id: string
   handle: string
   name: string | null
+  /** The platform it is on (OP-118); X when left out. */
+  platform?: string
 }
 
 /**
@@ -89,6 +100,8 @@ export interface ToolAccounts {
   forCall(args: Record<string, unknown>): string | null
   /** MCP only: the accounts a call may name, which adds the `account` parameter. */
   named?: () => ToolAccount[]
+  /** The rules the call's account follows (OP-122); X's when left out or there is no account. */
+  rules?: (accountId: string | null) => PlatformRules
   /**
    * In-app agent only: the media ids on the user's message the running turn answers (OP-89). A
    * create or update that leaves one of them off every post says so in its result.
@@ -103,10 +116,12 @@ const bare = (handle: string): string => handle.trim().replace(/^@/, '').toLower
 /** For MCP clients: `account` names one by handle, and leaving it out means the active one. */
 export function namedAccounts(
   list: () => ToolAccount[],
-  active: () => string | null
+  active: () => string | null,
+  rules?: (accountId: string | null) => PlatformRules
 ): ToolAccounts {
   return {
     named: list,
+    ...(rules ? { rules } : {}),
     forCall(args) {
       const handle = args['account']
       if (handle === undefined) return active()
@@ -133,28 +148,56 @@ function partsInput(
   item: Record<string, unknown>,
   field: string,
   allowed: ReadonlySet<string>,
-  kept: ReadonlySet<string> = new Set()
+  kept: ReadonlySet<string> = new Set(),
+  rules: PlatformRules = X
 ): NewPostPart[] {
   const hasText = item['text'] !== undefined
   const hasParts = item['parts'] !== undefined
   if (hasText === hasParts) throw new ToolInputError(`${field}: give either text or parts`)
-  if (hasText) return [{ text: postText(item['text'], `${field}.text`) }]
+  if (hasText) {
+    if (!rules.textOnly) throw new ToolInputError(`${field}: ${needsVideo(rules)}`)
+    return [{ text: postText(item['text'], `${field}.text`, false, rules) }]
+  }
 
   const list = item['parts']
   if (!Array.isArray(list) || list.length === 0) {
     throw new ToolInputError(`${field}.parts must be a non-empty array`)
   }
-  if (list.length > MAX_PARTS) {
-    throw new ToolInputError(`${field}.parts: a thread can have at most ${MAX_PARTS} posts`)
+  if (list.length > rules.maxParts) {
+    throw new ToolInputError(
+      rules.maxParts === 1
+        ? `${field}.parts: a ${rules.name} post can't be a thread. Give one part: the video and its ${rules.textName}.`
+        : `${field}.parts: a thread can have at most ${rules.maxParts} posts`
+    )
   }
   return list.map((raw, i) => {
     const part = object(raw)
     const where = `${field}.parts[${i}]`
     const media = mediaInput(part['media'], `${where}.media`, allowed, kept)
-    const text = postText(part['text'], `${where}.text`, media.length > 0)
+    if (rules.videoRequired && media.length === 0) {
+      throw new ToolInputError(`${where}: ${needsVideo(rules)}`)
+    }
+    const text = postText(part['text'], `${where}.text`, media.length > 0, rules)
     return { text, media }
   })
 }
+
+/** What to tell the model when a post on a video-only platform has none. */
+function needsVideo(rules: PlatformRules): string {
+  return (
+    `a ${rules.name} post needs a video. Make one with render_video (it records at ` +
+    `${rules.video.renderSize.width}x${rules.video.renderSize.height} for this account), or ` +
+    'use a video the user attached, then give it in parts[0].media with the ' +
+    `${rules.textName} as parts[0].text.`
+  )
+}
+
+/** What the post tools' descriptions say about platforms other than X. */
+const PLATFORM_NOTE =
+  ` On a ${TIKTOK.name} account a post is one video with a ${TIKTOK.textName} of up to ` +
+  `${TIKTOK.maxText} characters, hashtags included in the ${TIKTOK.textName}: give it as parts ` +
+  `with one part whose media is the video. ${TIKTOK.name} takes no text-only posts, no threads, ` +
+  'no images and no GIFs. list_posts says which platform the account is on.'
 
 function mediaInput(
   value: unknown,
@@ -204,7 +247,7 @@ function assertMediaFree(ids: string[], posts: PostsService, own?: string): void
   }
 }
 
-function futureTime(value: unknown, field: string, now: Date): Date {
+export function futureTime(value: unknown, field: string, now: Date): Date {
   const text = string(value, field)
   if (!ISO_WITH_OFFSET.test(text)) {
     throw new ToolInputError(
@@ -343,6 +386,7 @@ export function postTools(
   mediaAllowed: (accountId: string | null) => ReadonlySet<string> = noMedia,
   accounts: ToolAccounts = NO_ACCOUNTS
 ): PostTool[] {
+  const rulesOf = (account: string | null): PlatformRules => accounts.rules?.(account) ?? X
   /** A post in the call's account. Another account's post is "not found", never shown. */
   const one = (id: unknown, account: string | null): Post => {
     const post = posts.get(string(id, 'id'))
@@ -385,18 +429,19 @@ export function postTools(
     {
       name: 'create_posts',
       description:
-        `Draft one or more posts for X (up to ${MAX_CREATE} per call). Each lands on the user's ` +
+        `Draft one or more posts for the account (up to ${MAX_CREATE} per call). Each lands on the user's ` +
         'calendar waiting for their approval, and goes out at its time only after they approve ' +
         'it in OpenCatt, unless the account has Autopilot on: then it is scheduled straight ' +
         'away, and the result says "scheduled (Autopilot on)". Give text for a single post, or parts for a thread (each part is one ' +
-        `post, replying to the one before, up to ${MAX_PARTS}) or a post with media. Each part's ` +
-        `text is at most ${MAX_WEIGHTED_LENGTH} characters as X counts them (a link counts 23, an ` +
+        `post, replying to the one before, up to ${X.maxParts} on X) or a post with media. On X each part's ` +
+        `text is at most ${X.maxText} characters as X counts them (a link counts 23, an ` +
         'emoji 2). Media is only files the user attached in this chat, by the id shown on their ' +
         'message, and a file they attached goes on the post as it is, not redrawn: up to 4 images, or 1 GIF, or 1 video per part, with alt text describing each ' +
         "image. Times are ISO with the user's UTC offset and must be in the future. All posts are " +
         'checked first; if one is invalid, none are created. A post whose first part has the ' +
         'same text and time as an existing one is not created again: it is reported under ' +
-        'already_scheduled, or under already_rejected if the user turned it down.',
+        'already_scheduled, or under already_rejected if the user turned it down.' +
+        PLATFORM_NOTE,
       inputSchema: {
         type: 'object',
         properties: {
@@ -435,10 +480,11 @@ export function postTools(
         }
         const at = now()
         const allowed = mediaAllowed(account)
+        const rules = rulesOf(account)
         const valid = list.map((item, i) => {
           const post = object(item)
           return {
-            parts: partsInput(post, `posts[${i}]`, allowed),
+            parts: partsInput(post, `posts[${i}]`, allowed, undefined, rules),
             scheduledAt: futureTime(post['scheduled_at'], `posts[${i}].scheduled_at`, at)
           }
         })
@@ -512,7 +558,10 @@ export function postTools(
         const account = accounts.forCall(args)
         const range = days(localDate(args['from'], 'from'), localDate(args['to'], 'to'))
         return {
-          content: json({ posts: range.flatMap((d) => posts.listByDay(d, account)).map(describe) })
+          content: json({
+            platform: rulesOf(account).name,
+            posts: range.flatMap((d) => posts.listByDay(d, account)).map(describe)
+          })
         }
       }
     },
@@ -541,8 +590,8 @@ export function postTools(
         const kept = new Set(current.parts.flatMap((p) => p.media.map((m) => m.id)))
         const patch =
           args['parts'] === undefined && args['text'] !== undefined
-            ? { text: postText(args['text'], 'text') }
-            : { parts: partsInput(args, 'post', mediaAllowed(account), kept) }
+            ? { text: postText(args['text'], 'text', false, rulesOf(account)) }
+            : { parts: partsInput(args, 'post', mediaAllowed(account), kept, rulesOf(account)) }
         if (patch.parts) assertMediaFree(mediaIdsOf(patch.parts), posts, current.id)
         const post = posts.update(current.id, patch, { by })
         return {
@@ -625,6 +674,7 @@ function listAccountsTool(named: () => ToolAccount[], accounts: ToolAccounts): P
           accounts: named().map((a) => ({
             handle: `@${a.handle}`,
             name: a.name,
+            platform: PLATFORM_RULES[a.platform === 'tiktok' ? 'tiktok' : 'x'].name,
             active: a.id === active
           }))
         })

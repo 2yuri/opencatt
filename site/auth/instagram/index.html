@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="referrer" content="no-referrer" />
+    <title>Back to OpenCatt</title>
+    <style>
+      :root {
+        color-scheme: dark;
+      }
+      body {
+        margin: 0;
+        min-height: 100vh;
+        display: grid;
+        place-items: center;
+        background: #0e0e12;
+        color: #f2f2f5;
+        font:
+          16px/1.5 system-ui,
+          -apple-system,
+          'Segoe UI',
+          sans-serif;
+        text-align: center;
+      }
+      p {
+        color: #a1a1ad;
+      }
+      a {
+        color: #7c6cff;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Back to OpenCatt…</h1>
+      <p id="note">
+        If nothing happens, open OpenCatt and connect Instagram again from Integrations.
+      </p>
+      <p><a id="back" href="http://127.0.0.1:47826/callback">Go back to OpenCatt</a></p>
+    </main>
+    <script>
+      // Meta only sends sign-ins to a fixed https address, so it sends them here, and this page
+      // hands Meta's answer to OpenCatt on this computer (OP-126): only the sign-in fields, to
+      // nowhere else. Nothing is stored or logged. This address is registered in every user's
+      // Meta app: never move it.
+      const APP = 'http://127.0.0.1:47826/callback'
+      const query = new URLSearchParams(location.search)
+      const back = new URLSearchParams()
+      for (const key of ['code', 'state', 'error', 'error_reason', 'error_description']) {
+        const value = query.get(key)
+        if (value !== null) back.set(key, value)
+      }
+      const target = `${APP}?${back}`
+      document.getElementById('back').href = target
+      // Clear the code from the address bar and history before leaving.
+      history.replaceState(null, '', location.pathname)
+      if (back.has('state')) {
+        location.replace(target)
+      } else {
+        document.getElementById('note').textContent =
+          'This page finishes an Instagram sign-in started in OpenCatt. Start it again from ' +
+          'OpenCatt under Integrations.'
+      }
+    </script>
+  </body>
+</html>

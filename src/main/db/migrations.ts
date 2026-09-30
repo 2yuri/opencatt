@@ -304,6 +304,35 @@ export const migrations: string[] = [
   );
   CREATE INDEX x_costs_remote ON x_costs (remote_id);
   CREATE INDEX x_costs_sync ON x_costs (sync_id);
+  `,
+  // 18: the platform an account is on (OP-118). Every account until now is an X account.
+  `
+  ALTER TABLE accounts ADD COLUMN platform TEXT NOT NULL DEFAULT 'x'
+    CHECK (platform IN ('x', 'tiktok'));
+  `,
+  // 19: replies to the account's posts read from X on demand (OP-124), with read and answered
+  // state, one row per account a reply mentions; a post that answers one names it in reply_to; and each cost row says what it was
+  // for, so the comments' reads never count as a Dashboard sync.
+  `
+  CREATE TABLE comments (
+    remote_id TEXT NOT NULL,
+    account_id TEXT NOT NULL,
+    conversation_id TEXT NOT NULL,
+    in_reply_to TEXT,
+    author_id TEXT NOT NULL,
+    author_handle TEXT NOT NULL,
+    author_name TEXT,
+    text TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    read_at TEXT,
+    answered_by TEXT,
+    fetched_at TEXT NOT NULL,
+    PRIMARY KEY (remote_id, account_id)
+  );
+  CREATE INDEX comments_account ON comments (account_id, created_at);
+  ALTER TABLE posts ADD COLUMN reply_to TEXT;
+  ALTER TABLE x_costs ADD COLUMN source TEXT NOT NULL DEFAULT 'stats'
+    CHECK (source IN ('stats', 'comments'));
   `
 ]
 

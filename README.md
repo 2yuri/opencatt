@@ -235,6 +235,18 @@ scripts/build-windows.sh && scripts/check-windows.sh # OpenCatt.exe icon sizes a
 The Windows installer itself is built on Windows or in CI, because Wine doesn't run under amd64
 emulation on Apple Silicon.
 
+### Website
+
+The site in `site/` (the landing page, and `auth/instagram/`, which Instagram sign-ins return to)
+is published on GitHub Pages at https://2yuri.github.io/opencatt/. It reaches the public repo only
+through `scripts/publish-public.sh`, which allows only static files there, and
+`.github/workflows/pages.yml` deploys it from the public repo whenever `site/` changes.
+
+Pages has to be on once for the public repo (a fork does the same for its own): in the repo's
+**Settings → Pages**, set **Source** to **GitHub Actions**. With admin rights on the repo, the same
+from a terminal is `gh api -X POST repos/OWNER/REPO/pages -f build_type=workflow`. Never move
+`site/auth/instagram/`: every user registers that address in their own Meta app.
+
 ## License
 
 MIT

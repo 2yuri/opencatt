@@ -1,4 +1,4 @@
-import twitter from 'twitter-text'
+import { PLATFORM_RULES, textLength } from '@shared/platforms'
 import type { JsonValue, VoiceImages, VoiceProfile, WritingPrompt } from '@shared/api'
 import type { SettingsStore } from '../db'
 import { DEFAULT_WRITING } from './prompt'
@@ -88,9 +88,10 @@ export class VoiceStore {
       if (examples.length > MAX_EXAMPLES) {
         throw new Error(`Keep it to ${MAX_EXAMPLES} example posts.`)
       }
-      const long = examples.findIndex((e) => twitter.parseTweet(e).weightedLength > 280)
+      const x = PLATFORM_RULES.x
+      const long = examples.findIndex((e) => textLength(x, e) > x.maxText)
       if (long >= 0) {
-        throw new Error(`Example ${long + 1} is over 280 characters as X counts them.`)
+        throw new Error(`Example ${long + 1} is over ${x.maxText} characters as X counts them.`)
       }
       next.examples = examples
     }

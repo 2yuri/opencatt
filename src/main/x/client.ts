@@ -49,6 +49,18 @@ export interface TimelinePost {
   bookmarks: number
 }
 
+/** A post that mentions the account, as X's mentions timeline returns it (OP-124). */
+export interface Mention {
+  id: string
+  text: string
+  createdAt: string
+  /** The thread's first post. */
+  conversationId: string
+  /** The post it replies to, when it is a reply. */
+  inReplyTo: string | null
+  author: { id: string; handle: string; name: string | null }
+}
+
 export interface PublishedPart {
   remoteId: string
   remoteUrl: string
@@ -200,7 +212,8 @@ export class XClient {
       mediaIds.set(part.id, ids)
     }
 
-    let previous: string | null = null
+    // A reply to a comment (OP-124) starts under it; each part after replies to the one before.
+    let previous: string | null = post.replyTo
     let head: PublishedPart | null = null
     for (const part of post.parts) {
       if (part.remoteId) {
@@ -266,6 +279,64 @@ export class XClient {
         }
       ]
     })
+  }
+
+  /**
+   * The account's latest mentions (OP-124), up to 100, or only those newer than `sinceId` (and
+   * older than `untilId`, to fill a gap), with
+   * the thread each one is in and its author. Mentions are owned reads, charged per post
+   * returned; `users` counts the authors X sent along, in case it charges for those too.
+   */
+  async readMentions(
+    accountId: string,
+    sinceId: string | null = null,
+    untilId: string | null = null
+  ): Promise<{ mentions: Mention[]; users: number; more: boolean }> {
+    const params = new URLSearchParams({
+      max_results: '100',
+      'tweet.fields': 'conversation_id,in_reply_to_user_id,referenced_tweets,author_id,created_at',
+      expansions: 'author_id',
+      'user.fields': 'username,name'
+    })
+    if (sinceId) params.set('since_id', sinceId)
+    if (untilId) params.set('until_id', untilId)
+    const url = `${X_API}/2/users/${encodeURIComponent(accountId)}/mentions?${params}`
+    const res = await this.request(accountId, 'GET', url, undefined)
+    const json = (await res.json().catch(() => null)) as {
+      data?: {
+        id?: string
+        text?: string
+        created_at?: string
+        author_id?: string
+        conversation_id?: string
+        referenced_tweets?: { type?: string; id?: string }[]
+      }[]
+      includes?: { users?: { id?: string; username?: string; name?: string }[] }
+      meta?: { next_token?: string }
+    } | null
+    const users = new Map(
+      (json?.includes?.users ?? []).flatMap((u) => (u.id ? [[u.id, u] as const] : []))
+    )
+    const mentions = (json?.data ?? []).flatMap((m): Mention[] => {
+      if (!m.id || !m.author_id || !m.conversation_id) return []
+      const author = users.get(m.author_id)
+      return [
+        {
+          id: m.id,
+          text: m.text ?? '',
+          createdAt: m.created_at ?? this.now().toISOString(),
+          conversationId: m.conversation_id,
+          inReplyTo: m.referenced_tweets?.find((r) => r.type === 'replied_to')?.id ?? null,
+          author: {
+            id: m.author_id,
+            handle: author?.username ?? m.author_id,
+            name: author?.name ?? null
+          }
+        }
+      ]
+    })
+    // X has older ones in the same range: another page, which the caller reads on a later refresh.
+    return { mentions, users: users.size, more: typeof json?.meta?.next_token === 'string' }
   }
 
   /** What X would refuse, before anything is uploaded; returns the file's path. */

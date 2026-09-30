@@ -1,5 +1,6 @@
 import { format } from 'date-fns'
 import { MISSED_AFTER_MS, type Post, type XAccount } from '@shared/api'
+import { PLATFORM_RULES, type Platform } from '@shared/platforms'
 import type { PostsService } from './db/posts'
 import { XError, type PublishedPart } from './x/client'
 
@@ -17,14 +18,19 @@ export const UNCERTAIN_ERROR =
 export const MISSED_ERROR =
   'It was due more than an hour ago, while OpenCatt was closed or the computer was asleep.'
 
+export type PublishFn = (
+  post: Post,
+  onPartPosted: (partId: string, remote: PublishedPart) => void
+) => Promise<PublishedPart>
+
 export interface PublisherDeps {
   posts: PostsService
-  publish: (
-    post: Post,
-    onPartPosted: (partId: string, remote: PublishedPart) => void
-  ) => Promise<PublishedPart>
+  /** Sends an X post. */
+  publish: PublishFn
+  /** Sends a post on another platform (OP-118); a platform without one can't be posted to yet. */
+  publishers?: Partial<Record<Exclude<Platform, 'x'>, PublishFn>>
   account: (accountId: string) => XAccount | null
-  /** Uploads a soon-due post's videos ahead of time (OP-70); XClient.prepare in the app. */
+  /** Uploads a soon-due X post's videos ahead of time (OP-70); XClient.prepare in the app. */
   prepare?: (post: Post) => Promise<void>
   now?: () => Date
   setTimer?: (run: () => void, ms: number) => unknown
@@ -139,8 +145,10 @@ export class Publisher {
     const soon = new Date(this.now().getTime() + PREPARE_AHEAD_MS)
     const posts = this.deps.posts
       .listDue(soon)
-      .filter((post) =>
-        post.parts.some((p) => !p.remoteId && p.media.some((m) => m.kind === 'video'))
+      .filter(
+        (post) =>
+          this.platformOf(post) === 'x' &&
+          post.parts.some((p) => !p.remoteId && p.media.some((m) => m.kind === 'video'))
       )
     if (posts.length === 0) return
     this.preparing = (async () => {
@@ -153,8 +161,30 @@ export class Publisher {
     })
   }
 
+  /** The platform of the post's account. A post with no account, or a gone one, is an X post. */
+  private platformOf(post: Post): Platform {
+    return (post.accountId && this.deps.account(post.accountId)?.platform) || 'x'
+  }
+
+  private publisherFor(platform: Platform): PublishFn | null {
+    if (platform === 'x') return this.deps.publish
+    if (!PLATFORM_RULES[platform].publishes) return null
+    return this.deps.publishers?.[platform] ?? null
+  }
+
   private async send(post: Post): Promise<void> {
     const { posts } = this.deps
+    const platform = this.platformOf(post)
+    const publish = this.publisherFor(platform)
+    if (!publish) {
+      // Nothing was sent, and trying again won't help until OpenCatt can post there.
+      posts.markFailed(
+        post.id,
+        'rejected',
+        `OpenCatt can't post to ${PLATFORM_RULES[platform].name} yet.`
+      )
+      return
+    }
     // Late from when it was last meant to go: a retry X asked us to hold (a rate-limit reset)
     // isn't missed, but a retry the app slept through by more than an hour is.
     const late = this.now().getTime() - Date.parse(post.nextAttemptAt ?? post.scheduledAt)
@@ -166,7 +196,7 @@ export class Publisher {
     if (!posts.markPosting(post.id)) return
     const claimed = posts.get(post.id)!
     try {
-      await this.deps.publish(claimed, (partId, remote) => posts.markPartPosted(partId, remote))
+      await publish(claimed, (partId, remote) => posts.markPartPosted(partId, remote))
       posts.markPosted(post.id)
       this.attempts.delete(post.id)
     } catch (err) {

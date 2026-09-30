@@ -17,7 +17,9 @@ export const MCP_TOOL_NAMES = [
   'create_posts',
   'list_posts',
   'reschedule_post',
-  'list_accounts'
+  'list_accounts',
+  'list_comments',
+  'reply_to_comment'
 ] as const
 
 /** Outside agents don't know the user's clock, and times must carry the user's offset. */
@@ -47,10 +49,13 @@ export function mcpTools(all: PostTool[], now: () => Date = () => new Date()): P
 }
 
 const INSTRUCTIONS =
-  'OpenCatt schedules posts on X. Posts you create or move wait for the user to approve them in ' +
+  'OpenCatt schedules posts on X and TikTok. Posts you create or move wait for the user to approve them in ' +
   "OpenCatt, and only approved posts go out at their time. You can't approve posts; tell the user " +
   'they are waiting for approval. Call current_time first, then create_posts with ISO times ' +
-  "that carry the user's UTC offset."
+  "that carry the user's UTC offset. list_accounts shows each account's platform: a TikTok post " +
+  'is one video with a caption, so create_posts refuses text-only posts and threads there. ' +
+  "list_comments shows replies to the user's X posts as of their last refresh in OpenCatt, and " +
+  'reply_to_comment answers one, also waiting for approval.'
 
 /** One MCP server per request: the transport is stateless, so there is no session to keep. */
 function mcpServer(tools: PostTool[], version: string): Server {

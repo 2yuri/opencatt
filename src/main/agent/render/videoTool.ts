@@ -1,4 +1,5 @@
 import type { PostMedia } from '@shared/api'
+import { PLATFORM_RULES, type PlatformRules } from '@shared/platforms'
 import type { ModelImage } from '../images'
 import { ToolInputError, type PostTool } from '../tools'
 import { LANDSCAPE_BOX, PORTRAIT_BOX } from '../../media/video'
@@ -79,15 +80,19 @@ export function renderVideoTool(
   toModel: (png: Buffer) => ModelImage | null,
   /** The user's attachments the composition may place as they are (OP-89). */
   assets?: AssetSource,
-  recordings?: RecordingCount
+  recordings?: RecordingCount,
+  /** The rules of the account the turn writes for (OP-122): its size and length; X's by default. */
+  rules: () => PlatformRules = () => PLATFORM_RULES.x
 ): PostTool {
   return {
     name: 'render_video',
     description:
       'Record a short video for a post from a HyperFrames composition: one HTML page with a ' +
       'data-composition-id root and a paused GSAP timeline, written to the contract below. ' +
-      `Up to ${MAX_VIDEO_SECONDS} seconds at ${VIDEO_FPS} fps, 1280x720 by default or 1080x1080 ` +
-      "square, silent. Set width and height to the root's data-width and data-height, and " +
+      `Up to ${MAX_VIDEO_SECONDS} seconds at ${VIDEO_FPS} fps, silent. The default size follows ` +
+      'the account: 1280x720 for X (or 1080x1080 square), and 1080x1920 vertical for TikTok, ' +
+      `where a video runs at least ${PLATFORM_RULES.tiktok.video.minSeconds} seconds. ` +
+      "Set width and height to the root's data-width and data-height, and " +
       'seconds to its data-duration. You get back a media_id and the middle frame; attach the ' +
       'video with create_posts or update_post like any file. Recording takes about as long as ' +
       "the video, so don't redo it without a reason. Only when the user asks for a video or " +
@@ -101,8 +106,14 @@ export function renderVideoTool(
       properties: {
         html: { type: 'string', description: 'A full HTML document, sized to width x height.' },
         seconds: { type: 'number', description: `Length, 1 to ${MAX_VIDEO_SECONDS}. Default 15.` },
-        width: { type: 'integer', description: 'Pixels, even, default 1280.' },
-        height: { type: 'integer', description: 'Pixels, even, default 720.' },
+        width: {
+          type: 'integer',
+          description: "Pixels, even. Default: the account's size (1280 on X, 1080 on TikTok)."
+        },
+        height: {
+          type: 'integer',
+          description: "Pixels, even. Default: the account's size (720 on X, 1920 on TikTok)."
+        },
         assets: {
           type: 'array',
           items: { type: 'string' },
@@ -126,19 +137,27 @@ export function renderVideoTool(
       if (html.length > MAX_HTML_CHARS) {
         throw new ToolInputError(`html is over ${MAX_HTML_CHARS} characters. Simplify it.`)
       }
+      const platform = rules()
+      // The platform's own bounds, inside what the recorder can make.
+      const shortest = Math.max(1, Math.ceil(platform.video.minSeconds))
+      const longest = Math.min(MAX_VIDEO_SECONDS, platform.video.maxSeconds)
       const seconds = args['seconds'] ?? 15
-      if (typeof seconds !== 'number' || !(seconds >= 1 && seconds <= MAX_VIDEO_SECONDS)) {
-        throw new ToolInputError(`seconds must be between 1 and ${MAX_VIDEO_SECONDS}`)
+      if (typeof seconds !== 'number' || !(seconds >= shortest && seconds <= longest)) {
+        throw new ToolInputError(
+          `seconds must be between ${shortest} and ${longest}` +
+            (platform.platform === 'x' ? '' : ` for a ${platform.name} video`)
+        )
       }
+      const size = platform.video.renderSize
       const spec = {
-        width: side(args['width'], 'width', VIDEO_PRESETS.landscape.width),
-        height: side(args['height'], 'height', VIDEO_PRESETS.landscape.height),
+        width: side(args['width'], 'width', size.width),
+        height: side(args['height'], 'height', size.height),
         seconds
       }
       // Recordings go straight into the media store, past OP-18's convert, so X's frame limits
-      // are checked here rather than when the post goes out.
+      // are checked here rather than when the post goes out. TikTok takes any shape up to 1920.
       const box = spec.height > spec.width ? PORTRAIT_BOX : LANDSCAPE_BOX
-      if (spec.width > box.width || spec.height > box.height) {
+      if (platform.platform === 'x' && (spec.width > box.width || spec.height > box.height)) {
         throw new ToolInputError(
           `${spec.width}x${spec.height} is larger than X takes: up to ` +
             `${LANDSCAPE_BOX.width}x${LANDSCAPE_BOX.height} landscape or square, ` +

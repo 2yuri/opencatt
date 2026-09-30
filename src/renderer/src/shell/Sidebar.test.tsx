@@ -148,7 +148,7 @@ describe('Sidebar account switcher', () => {
     renderWithAccounts()
     const button = await switcher()
     expect(within(button).getByText('Acme')).toBeTruthy()
-    expect(within(button).getByText('@acme')).toBeTruthy()
+    expect(within(button).getByText('@acme · X')).toBeTruthy()
     expect(await within(button).findByLabelText('2 waiting in other accounts')).toBeTruthy()
     expect(button.getAttribute('aria-expanded')).toBe('false')
   })
@@ -171,18 +171,42 @@ describe('Sidebar account switcher', () => {
   it('lists every account with its waiting count, the active one checked', async () => {
     renderWithAccounts()
     fireEvent.click(await switcher())
-    const menu = screen.getByRole('menu', { name: 'X accounts' })
+    const menu = screen.getByRole('menu', { name: 'Accounts' })
     const rows = within(menu).getAllByRole('menuitemradio')
     expect(rows.map((r) => r.textContent)).toEqual([
-      'AAcme@acme4',
-      'MMaria Souza@mariasouza2',
-      'SSide projectNeeds reconnecting'
+      'AXAcme@acme · X4',
+      'MXMaria Souza@mariasouza · X2',
+      'SXSide projectNeeds reconnecting'
     ])
     expect(rows.map((r) => r.getAttribute('aria-checked'))).toEqual(['true', 'false', 'false'])
     expect(document.activeElement).toBe(rows[0])
     // Arrow keys move between the rows.
     fireEvent.keyDown(rows[0]!, { key: 'ArrowDown' })
     expect(document.activeElement).toBe(rows[1])
+  })
+
+  it('marks each account with its platform (OP-118)', async () => {
+    const fake = fakeApi()
+    Object.assign(fake.authStatus, {
+      accounts: [xAccount('acme'), xAccount('acme.hq', { id: 'tiktok:1', platform: 'tiktok' })],
+      activeAccountId: 'acme'
+    })
+    window.opencat = fake.api
+    render(
+      <MemoryRouter>
+        <Sidebar connected />
+      </MemoryRouter>
+    )
+    const button = await switcher()
+    expect(within(button).getByRole('img', { name: 'X' })).toBeTruthy()
+    fireEvent.click(button)
+    const menu = screen.getByRole('menu', { name: 'Accounts' })
+    expect(within(menu).getByText('@acme.hq · TikTok')).toBeTruthy()
+    expect(
+      within(menu)
+        .getAllByRole('img')
+        .map((mark) => mark.getAttribute('aria-label'))
+    ).toEqual(['X', 'TikTok'])
   })
 
   it('switches to another account and closes', async () => {
@@ -192,7 +216,7 @@ describe('Sidebar account switcher', () => {
     expect(fake.api.auth.setActive).toHaveBeenCalledWith('mariasouza')
     expect(screen.queryByRole('menu')).toBeNull()
     // Main says so, and the row follows; Acme's 4 now count as elsewhere.
-    expect(await within(await switcher()).findByText('@mariasouza')).toBeTruthy()
+    expect(await within(await switcher()).findByText('@mariasouza · X')).toBeTruthy()
     expect(await screen.findByLabelText('4 waiting in other accounts')).toBeTruthy()
   })
 
@@ -266,7 +290,7 @@ describe('Sidebar account switcher', () => {
       stubWindowWidth(1000)
       renderWithAccounts()
       const button = await switcher()
-      expect(within(button).queryByText('@acme')).toBeNull()
+      expect(within(button).queryByText('@acme · X')).toBeNull()
       expect(button.getAttribute('title')).toBe('@acme')
       const badge = await within(button).findByTestId('rail-account-badge')
       expect(badge.textContent).toBe('2')

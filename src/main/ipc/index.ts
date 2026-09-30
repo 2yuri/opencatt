@@ -22,6 +22,7 @@ import type { MediaImports } from '../media/imports'
 import type { PastedFiles } from '../media/pasted'
 import type { AutopilotStore } from '../agent/autopilot'
 import type { StatsService } from '../stats/service'
+import type { CommentsService } from '../comments/service'
 import type { OnboardingService } from '../onboarding'
 import { ping } from '../ping'
 import { showPendingBadge } from '../badge'
@@ -44,9 +45,23 @@ export function registerIpc(
     pasted?: PastedFiles
     autopilot?: AutopilotStore
     stats?: StatsService
+    comments?: CommentsService
   } = {}
 ): void {
-  const { prePrompt, voices, writing, pasted, autopilot, stats } = extras
+  const { prePrompt, voices, writing, pasted, autopilot, stats, comments } = extras
+  if (comments) {
+    ipcMain.handle(IpcChannel.CommentsEstimate, () => comments.estimate())
+    ipcMain.handle(IpcChannel.CommentsRefresh, () => comments.refresh())
+    ipcMain.handle(IpcChannel.CommentsList, () => comments.list())
+    ipcMain.handle(IpcChannel.CommentsLastRefresh, () => comments.lastRefresh())
+    ipcMain.handle(IpcChannel.CommentsMarkRead, (_e, ids) =>
+      comments.markRead(Array.isArray(ids) ? ids.map(String) : [])
+    )
+    // From the page it is the user's own reply, so it is scheduled, not waiting for approval.
+    ipcMain.handle(IpcChannel.CommentsReply, (_e, remoteId, reply) =>
+      comments.reply(String(remoteId), reply, 'user')
+    )
+  }
   if (stats) {
     ipcMain.handle(IpcChannel.StatsEstimate, () => stats.estimate())
     ipcMain.handle(IpcChannel.StatsSync, () => stats.sync())

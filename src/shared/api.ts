@@ -1,6 +1,7 @@
 // The contract between the renderer and the main process. Every IPC channel
 // the renderer may call is named here, and the preload exposes exactly this.
 
+import type { Platform } from './platforms'
 import type { OAuth1Keys, XAuthMode } from './x'
 
 export const IpcChannel = {
@@ -42,6 +43,12 @@ export const IpcChannel = {
   StatsPricesReset: 'stats:prices:reset',
   StatsFilterGet: 'stats:filter:get',
   StatsFilterSet: 'stats:filter:set',
+  CommentsEstimate: 'comments:estimate',
+  CommentsRefresh: 'comments:refresh',
+  CommentsList: 'comments:list',
+  CommentsLastRefresh: 'comments:lastRefresh',
+  CommentsMarkRead: 'comments:markRead',
+  CommentsReply: 'comments:reply',
   AgentSend: 'agent:send',
   AgentCapabilities: 'agent:capabilities',
   VideoPrePromptGet: 'video:prePrompt:get',
@@ -98,6 +105,8 @@ export const IpcEvent = {
   AutopilotChanged: 'autopilot:changed',
   /** Stats or costs changed: { accountId } (OP-109). */
   StatsChanged: 'stats:changed',
+  /** Comments were read, marked or answered: { accountId } (OP-124). */
+  CommentsChanged: 'comments:changed',
   /** An account's voice was saved: { accountId, profile }. */
   VoiceChanged: 'voice:changed'
 } as const
@@ -172,6 +181,8 @@ export interface Post {
   createdBy: PostAuthor
   /** Autopilot scheduled it without the user's approval (OP-103). */
   autopilot: boolean
+  /** The X post this one answers, a comment on the Interactions page (OP-124); null otherwise. */
+  replyTo: string | null
   /** The first part's text, for cards and lists. */
   text: string
   /** Always at least one part, in order. */
@@ -212,6 +223,8 @@ export interface NewPost {
   parts?: NewPostPart[]
   /** Any string Date can parse; stored as UTC. */
   scheduledAt: string
+  /** The X post it answers (OP-124): its first part goes out as a reply to it. */
+  replyTo?: string
 }
 
 /**
@@ -432,6 +445,92 @@ export interface StatsApi {
     set(prices: Partial<Pick<XPrices, 'ownedRead' | 'post' | 'postWithUrl'>>): Promise<XPrices>
     reset(): Promise<XPrices>
   }
+}
+
+/**
+ * A reply someone left in the thread of one of the active X account's posts (OP-124). Read from
+ * X's mentions of the account, on demand only.
+ */
+export interface Comment {
+  remoteId: string
+  accountId: string
+  /** The thread's first post, one of ours. */
+  conversationId: string
+  /** The post it answers: ours, or another comment in the thread. */
+  inReplyTo: string | null
+  /** The OpenCatt post the thread starts from, when OpenCatt published it. */
+  postId: string | null
+  /**
+   * The thread's first post, one of ours, when OpenCatt knows its text: it published it, or the
+   * Dashboard read it. Null otherwise; comments never cost an extra read to fill it.
+   */
+  thread: { remoteId: string; text: string; createdAt: string | null; url: string } | null
+  /**
+   * Every part of the thread, in order, when OpenCatt published it; empty otherwise. The part
+   * whose remoteId is inReplyTo is the one this comment answers.
+   */
+  threadParts: { remoteId: string; text: string }[]
+  /**
+   * The conversation from our post down to the post this one answers, oldest first: the part of
+   * our thread it hangs from, then each reply in between. Built only from what OpenCatt stored.
+   */
+  path: { remoteId: string; handle: string; text: string }[]
+  /** False when a post in between was never stored (a reply that didn't mention the account). */
+  pathComplete: boolean
+  /** The comment or later thread part it answers, when that isn't the first post; null otherwise. */
+  parent: { remoteId: string; text: string; handle: string } | null
+  author: { id: string; handle: string; name: string | null }
+  text: string
+  createdAt: string
+  /** The comment on x.com. */
+  url: string
+  /** When the user saw it in OpenCatt; null while it's new. */
+  readAt: string | null
+  /** The OpenCatt post that answers it, and where that post stands; null until one is made. */
+  answer: { postId: string; status: PostStatus; scheduledAt: string } | null
+}
+
+/** What a comments refresh would cost at today's prices (OP-124); every dollar is an estimate. */
+export interface CommentsEstimate {
+  /** How many mentions X may return at most. */
+  reads: number
+  dollars: number
+  /** The real count is often lower: X charges only for what it returns. */
+  upTo: boolean
+  pricesAsOf: string
+}
+
+export interface CommentsRefreshResult {
+  /** Mentions X returned, each one charged. */
+  read: number
+  /** Of those, the replies in our posts' threads that were new or changed. */
+  kept: number
+  spent: number
+  refreshedAt: string
+  /** More new replies are waiting than one refresh reads; the next refresh reads them. */
+  more: boolean
+}
+
+/** A reply to a comment: now when scheduledAt is left out (OP-124). */
+export interface CommentReply {
+  text: string
+  scheduledAt?: string
+}
+
+export interface CommentsApi {
+  estimate(): Promise<CommentsEstimate>
+  /** Reads new replies to the active account's posts from X; rejects with a plain message. */
+  refresh(): Promise<CommentsRefreshResult>
+  /** The active account's comments, newest first. */
+  list(): Promise<Comment[]>
+  lastRefresh(): Promise<{ at: string; spent: number } | null>
+  markRead(remoteIds: string[]): Promise<void>
+  /**
+   * Answers a comment from the user: a post replying to it, scheduled at `scheduledAt` or now,
+   * sent by the publisher. Rejects with a plain message (unknown comment, too long, TikTok).
+   */
+  reply(remoteId: string, reply: CommentReply): Promise<Post>
+  onChanged(listener: (event: { accountId: string | null }) => void): () => void
 }
 
 /** Autopilot for an X account turned on or off (OP-103). */
@@ -723,9 +822,11 @@ export interface AppApi {
 
 // X accounts, all signed in through the user's one X app (OP-5). Posts carry the account's id.
 
-export interface XAccount {
-  /** The X user id. */
+/** A connected account on any platform (OP-118). */
+export interface Account {
+  /** The X user id; other platforms' ids carry their platform, as in "tiktok:<open_id>". */
   id: string
+  platform: Platform
   /** Without the "@"; refreshed whenever the token is. */
   handle: string
   name: string | null
@@ -734,6 +835,9 @@ export interface XAccount {
   /** X refused its token: the user has to sign in again (auth.connect) before it can post. */
   needsReconnect: boolean
 }
+
+/** The name from before accounts had a platform; the same type. */
+export type XAccount = Account
 
 export interface AuthStatus {
   accounts: XAccount[]
@@ -768,6 +872,8 @@ export interface McpStatus {
   running: boolean
   /** Why it isn't running although enabled, e.g. the port is taken. */
   error: string | null
+  /** The port it listens on; a test build uses its own (OP-134). */
+  port?: number
   /** Ready to paste, present while enabled. They contain the access token. */
   claudeCode?: string
   claudeDesktop?: string
@@ -788,7 +894,7 @@ export type VoiceImages = 'always' | 'ask' | 'never'
  */
 export interface VoiceProfile {
   description: string
-  /** Up to 10 posts in this voice, each within 280 characters as X counts them. */
+  /** Up to 10 posts in this voice, each within X's post length (src/shared/platforms.ts). */
   examples: string[]
   /** 'auto' writes in the language the user writes in; otherwise a language code like 'pt-BR'. */
   language: string
@@ -831,6 +937,7 @@ export interface OpenCatApi {
   voice: VoiceApi
   autopilot: AutopilotApi
   stats: StatsApi
+  comments: CommentsApi
   mcp: McpApi
   media: MediaApi
   onboarding: OnboardingApi

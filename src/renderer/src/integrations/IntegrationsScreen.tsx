@@ -5,6 +5,7 @@ import type { McpStatus, XAccount } from '@shared/api'
 import { authErrorMessage } from '@shared/authErrors'
 import { MCP_PORT } from '@shared/mcp'
 import { Avatar } from '../shell/AccountSwitcher'
+import { handleLine } from '../shell/PlatformMark'
 import { useActiveAccount } from '../shell/useActiveAccount'
 import { Pill, Segmented, SegmentedItem, Switch } from '../ui'
 
@@ -43,7 +44,7 @@ export function IntegrationsScreen(): React.JSX.Element {
         <Section title="MCP server" sub="for Claude Desktop, Claude Code and other agents">
           <McpRows />
         </Section>
-        <Section title="X accounts">
+        <Section title="Accounts">
           <AccountRows />
         </Section>
       </div>
@@ -207,7 +208,7 @@ function McpRows(): React.JSX.Element {
 /** Running, off, or on but not running and why: a coloured dot and a line in mono. */
 function ServerState({ status }: { status: McpStatus }): React.JSX.Element {
   const [dot, text] = status.running
-    ? ['bg-ds-green', `Running on 127.0.0.1:${MCP_PORT}`]
+    ? ['bg-ds-green', `Running on 127.0.0.1:${status.port ?? MCP_PORT}`]
     : status.enabled
       ? ['bg-ds-red', status.error ?? 'Not running']
       : ['bg-ds-text-3', 'Off']
@@ -522,12 +523,12 @@ function AccountRow({
       className="flex flex-wrap items-center gap-x-3 gap-y-2 px-4 py-3"
     >
       <div className="flex min-w-[160px] flex-1 items-center gap-3">
-        <Avatar account={account} index={index} size={32} />
+        <Avatar account={account} index={index} size={32} badge />
         <div className="flex min-w-0 flex-1 flex-col gap-0.5">
           <span id={nameId} className={`${TITLE} truncate`}>
             {account.name || `@${account.handle}`}
           </span>
-          <span className="truncate text-[12px] text-ds-text-3">@{account.handle}</span>
+          <span className="truncate text-[12px] text-ds-text-3">{handleLine(account)}</span>
           {error && (
             <span role="alert" className={ERROR}>
               {error}

@@ -1,4 +1,5 @@
 import type { ChatMessage, PostMedia, VoiceImages, VoiceProfile } from '@shared/api'
+import { PLATFORM_RULES, type Platform } from '@shared/platforms'
 import { localIso } from './tools'
 
 /**
@@ -26,7 +27,7 @@ You draft posts and put them on the user's calendar with your tools. Every post 
  */
 export const DEFAULT_WRITING = `How to write for X:
 
-- Every post, and every part of a thread, fits in 280 characters as X counts them. Most emoji and CJK characters count as two, and a link counts as 23 whatever its length.
+- Every post, and every part of a thread, fits in ${PLATFORM_RULES.x.maxText} characters as X counts them. Most emoji and CJK characters count as two, and a link counts as 23 whatever its length.
 - The first line does the work: it's all most people see in the feed. Open with the point, the surprising fact or the claim, never with a warm-up like "Excited to share" or "In today's fast-paced world".
 - One idea per post. Most things are one post. Write a thread only when the material needs more room: a first post that stands on its own and makes people want the rest, then one point per part, with no "1/" or "Thread:" labels unless the voice uses them.
 - Write like a person typing on X, not a press release: short sentences, plain words, specifics and numbers instead of adjectives.
@@ -83,12 +84,15 @@ export function accountNote(
     name: string | null
     voice?: VoiceProfile
     autopilot?: boolean
+    platform?: Platform
   } | null
 ): string {
   if (!account) return ''
+  const rules = PLATFORM_RULES[account.platform ?? 'x']
   const who = account.name ? `${account.name} (@${account.handle})` : `@${account.handle}`
-  const note = `You are writing for the X account ${who}. Every post you create, list or move is that account's; write in its voice.`
+  const note = `You are writing for the ${rules.name} account ${who}. Every post you create, list or move is that account's; write in its voice.`
   const parts = [note]
+  if (rules.platform === 'tiktok') parts.push(TIKTOK_NOTE)
   if (account.autopilot) parts.push(AUTOPILOT_NOTE)
   if (account.voice) parts.push(voiceNote(account.handle, account.voice))
   return parts.join('\n\n')
@@ -100,6 +104,18 @@ export function accountNote(
  */
 const AUTOPILOT_NOTE =
   "Autopilot is on for this account: the posts you create or change are scheduled straight away, without the user's approval, and go out at their time. Say they are scheduled, not waiting for approval. A post that was already waiting for approval still waits until the user approves it."
+
+/**
+ * A TikTok account (OP-122). It comes after the writing guide, so where that guide is about X,
+ * this wins: a video with a caption, never text on its own.
+ */
+const TIKTOK = PLATFORM_RULES.tiktok
+const TIKTOK_NOTE = `This account is on TikTok, so the guide above about X's length, threads and hashtags doesn't apply here. On TikTok:
+
+- Every post is one video with a caption. There are no text-only posts, no threads, and no images or GIFs. If the user attached a video, use it as it is; otherwise make one with render_video, which records at ${TIKTOK.video.renderSize.width}x${TIKTOK.video.renderSize.height}, vertical and full screen, the shape TikTok shows best. Set the root's data-width and data-height to match.
+- Videos run from ${TIKTOK.video.minSeconds} seconds up to the account's maximum; short ones, 15 to 30 seconds, do best. The first second has to hold the viewer: open on the point, big and readable, with text sized for a phone.
+- The caption can be up to ${TIKTOK.maxText} characters, but a line or two is usual: what the video is, then 3 to 5 relevant hashtags at the end. Hashtags go in the caption; that is where TikTok reads them.
+- When you create the post, give it as parts with one part: the video's media id in media and the caption as its text.`
 
 const LANGUAGES = new Intl.DisplayNames(['en'], { type: 'language' })
 
