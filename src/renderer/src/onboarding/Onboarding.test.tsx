@@ -135,6 +135,9 @@ describe('FirstRunGate', () => {
     ])
     expect(rail.getByText('Welcome').closest('li')?.getAttribute('aria-current')).toBe('step')
     expect(screen.getByTestId('cost-note').textContent).toMatch(/Pay Per Use or higher/)
+    expect(screen.getByTestId('cost-note').textContent).toMatch(
+      /A post with a link costs much more than one without\./
+    )
     expect(screen.queryByRole('group', { name: 'View' })).toBeNull()
   })
 

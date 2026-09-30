@@ -64,6 +64,7 @@ interface PostRow {
   updated_at: string
   created_by: PostAuthor
   next_attempt_at: string | null
+  autopilot: number
 }
 
 interface PartRow {
@@ -108,6 +109,13 @@ export class PostsService {
   ) {}
 
   private accounts: PostAccounts = { active: () => null, canPost: () => false }
+
+  /** Whether an account lets the agent or an MCP client schedule without approval (OP-103). */
+  private autopilot: (accountId: string | null, by: PostAuthor) => boolean = () => false
+
+  useAutopilot(check: (accountId: string | null, by: PostAuthor) => boolean): void {
+    this.autopilot = check
+  }
 
   /**
    * The X accounts (OP-5): posts created without an accountId go to the active one, and lists
@@ -157,28 +165,27 @@ export class PostsService {
     return post
   }
 
-  /** A post from the agent or an MCP client (`by`) waits for the user's approval. */
+  /**
+   * A post from the agent or an MCP client (`by`) waits for the user's approval, unless its
+   * account has Autopilot on for that author (OP-103).
+   */
   create(input: NewPost, { by = 'user' }: ByWhom = {}): Post {
     const parts = partsOf(input)
     const at = this.now().toISOString()
     const id = randomUUID()
     const scheduledAt = toUtcIso(input.scheduledAt)
-    const status: PostStatus = by === 'user' ? 'scheduled' : 'pending_approval'
+    const accountId = input.accountId ?? this.accounts.active()
+    const author = authorOf(by)
+    const auto = author !== 'user' && this.autopilot(accountId, author)
+    const status: PostStatus = author === 'user' || auto ? 'scheduled' : 'pending_approval'
     transaction(this.db, () => {
       this.db
         .prepare(
-          `INSERT INTO posts (id, account_id, scheduled_at, status, created_by, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?)`
+          `INSERT INTO posts
+             (id, account_id, scheduled_at, status, created_by, created_at, updated_at, autopilot)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
         )
-        .run(
-          id,
-          input.accountId ?? this.accounts.active(),
-          scheduledAt,
-          status,
-          authorOf(by),
-          at,
-          at
-        )
+        .run(id, accountId, scheduledAt, status, author, at, at, auto ? 1 : 0)
       this.writeParts(id, parts, [])
     })
     this.changed([id])
@@ -340,8 +347,14 @@ export class PostsService {
       )
     }
 
+    // The agent's or an MCP client's change waits for approval again, unless Autopilot is on for
+    // the account (OP-103). A post that was already waiting keeps waiting: Autopilot never
+    // approves anything retroactively.
+    const author = authorOf(by)
+    const auto =
+      author !== 'user' && post.status !== 'pending_approval' && this.autopilot(accountId, author)
     const status: PostStatus =
-      authorOf(by) !== 'user' || post.status === 'pending_approval'
+      (author !== 'user' && !auto) || post.status === 'pending_approval'
         ? 'pending_approval'
         : 'scheduled'
     let removed: string[] = []
@@ -349,9 +362,11 @@ export class PostsService {
       this.db
         .prepare(
           `UPDATE posts SET scheduled_at = ?, status = ?, account_id = ?, next_attempt_at = NULL, error = NULL,
-           error_code = NULL, updated_at = ? WHERE id = ?`
+           error_code = NULL, updated_at = ?,
+           autopilot = CASE WHEN ? THEN 1 WHEN ? = 'pending_approval' THEN 0 ELSE autopilot END
+           WHERE id = ?`
         )
-        .run(scheduledAt, status, accountId, this.now().toISOString(), id)
+        .run(scheduledAt, status, accountId, this.now().toISOString(), auto ? 1 : 0, status, id)
       if (parts) removed = this.writeParts(id, parts, post.parts)
     })
     this.files.removeFiles(removed)
@@ -696,6 +711,7 @@ export class PostsService {
         accountId: row.account_id,
         nextAttemptAt: row.next_attempt_at,
         createdBy: row.created_by,
+        autopilot: row.autopilot === 1,
         text: postParts[0]?.text ?? '',
         parts: postParts,
         scheduledAt: row.scheduled_at,

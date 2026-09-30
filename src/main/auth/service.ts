@@ -52,6 +52,8 @@ export interface XAuthDeps {
   now?: () => Date
   /** Tells windows about any change to the accounts. */
   onChanged?: (status: AuthStatus) => void
+  /** The user disconnected this account, for settings that shouldn't outlive it (OP-105). */
+  onDisconnected?: (accountId: string) => void
   /** Tests point the callback server elsewhere. */
   callbackPort?: number
   callbackTimeoutMs?: number
@@ -201,6 +203,7 @@ export class XAuthService {
     // The account stays, signed out: its posts keep showing under it and fail as auth until the
     // user signs in again, instead of vanishing from every calendar.
     this.deps.accounts.setNeedsReconnect(accountId, true)
+    this.deps.onDisconnected?.(accountId)
     if (this.deps.settings.get(ACTIVE_ACCOUNT_KEY) === accountId) {
       const signedIn = this.deps.accounts.list().find((a) => !a.needsReconnect)
       if (signedIn) this.deps.settings.set(ACTIVE_ACCOUNT_KEY, signedIn.id)

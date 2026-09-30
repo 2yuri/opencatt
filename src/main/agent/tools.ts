@@ -268,12 +268,17 @@ function describe(post: Post): Record<string, unknown> {
         }),
     scheduled_at: localIso(at),
     weekday: WEEKDAY.format(at),
-    status: post.status,
+    status:
+      post.status === 'scheduled' && post.autopilot ? 'scheduled (Autopilot on)' : post.status,
     ...(post.status === 'pending_approval'
       ? {
           note: "Waiting for the user's approval in OpenCatt. It won't be posted until they approve it."
         }
-      : {}),
+      : post.status === 'scheduled' && post.autopilot
+        ? {
+            note: "Autopilot is on for this account, so it's scheduled without the user's approval and goes out at its time. They can still edit or delete it in OpenCatt."
+          }
+        : {}),
     ...(post.error ? { error: post.error } : {}),
     ...(post.remoteUrl ? { url: post.remoteUrl } : {})
   }
@@ -382,7 +387,8 @@ export function postTools(
       description:
         `Draft one or more posts for X (up to ${MAX_CREATE} per call). Each lands on the user's ` +
         'calendar waiting for their approval, and goes out at its time only after they approve ' +
-        'it in OpenCatt. Give text for a single post, or parts for a thread (each part is one ' +
+        'it in OpenCatt, unless the account has Autopilot on: then it is scheduled straight ' +
+        'away, and the result says "scheduled (Autopilot on)". Give text for a single post, or parts for a thread (each part is one ' +
         `post, replying to the one before, up to ${MAX_PARTS}) or a post with media. Each part's ` +
         `text is at most ${MAX_WEIGHTED_LENGTH} characters as X counts them (a link counts 23, an ` +
         'emoji 2). Media is only files the user attached in this chat, by the id shown on their ' +

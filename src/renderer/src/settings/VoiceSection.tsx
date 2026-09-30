@@ -17,7 +17,12 @@ const TEXTAREA =
  * Settings, Voice (OP-75): how the active X account's posts should sound. Every change saves on
  * its own, with just the field that changed; the Advanced prompts below apply to every account.
  */
-export function VoiceSection(): React.JSX.Element {
+export function VoiceSection({
+  onLoaded
+}: {
+  /** Told once the voice is on screen, so a section below can scroll to itself (OP-104). */
+  onLoaded?: () => void
+} = {}): React.JSX.Element {
   const { status, active } = useActiveAccount()
   const headingId = useId()
   const ref = useRef<HTMLElement>(null)
@@ -31,6 +36,10 @@ export function VoiceSection(): React.JSX.Element {
   useEffect(() => {
     if (known && location.hash === '#voice') ref.current?.scrollIntoView?.({ block: 'start' })
   }, [known, loaded, location.hash, location.key])
+
+  useEffect(() => {
+    if (loaded) onLoaded?.()
+  }, [loaded, onLoaded])
 
   return (
     <section id="voice" ref={ref} className={`${SECTION} scroll-mt-6`} aria-labelledby={headingId}>

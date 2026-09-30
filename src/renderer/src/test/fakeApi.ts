@@ -3,6 +3,7 @@ import type {
   AgentEvent,
   AgentStatus,
   AuthStatus,
+  AutopilotChanged,
   McpStatus,
   ChatMessage,
   ChatSession,
@@ -60,6 +61,10 @@ export interface FakeApi {
   chatMessages: Map<string, ChatMessage[]>
   /** Tells the renderer an account's chats changed, as main does; the active account's by default. */
   sessionsChanged(accountId?: string | null): void
+  /** Accounts with Autopilot on (OP-103); autopilot.get answers false for the rest. */
+  autopilot: Set<string>
+  /** Turns an account's Autopilot on or off elsewhere and tells the renderer, as main does. */
+  autopilotChanged(accountId: string, on: boolean): void
 }
 
 /** A chat as chat.sessions lists it; the fields given win. */
@@ -146,6 +151,7 @@ export function post(fields: Partial<Post> & Pick<Post, 'id' | 'text' | 'schedul
     accountId: null,
     nextAttemptAt: null,
     createdBy: 'user',
+    autopilot: false,
     status: 'scheduled',
     postedAt: null,
     remoteId: null,
@@ -252,6 +258,14 @@ export function fakeApi(history: ChatMessage[] = []): FakeApi {
     sessions.push(made)
     openSession(made.id)
     return made
+  }
+  // Autopilot per account (OP-103): like main, set refuses an account that isn't connected.
+  const autopilot = new Set<string>()
+  const autopilotListeners = new Set<(e: AutopilotChanged) => void>()
+  const autopilotChanged = (accountId: string, on: boolean): void => {
+    if (on) autopilot.add(accountId)
+    else autopilot.delete(accountId)
+    autopilotListeners.forEach((l) => l({ accountId, on }))
   }
   const writing = prompt('writing', DEFAULT_WRITING_GUIDE, 20_000)
   const video = prompt('video', DEFAULT_VIDEO_PROMPT, 4_000)
@@ -447,6 +461,20 @@ export function fakeApi(history: ChatMessage[] = []): FakeApi {
         return status()
       })
     },
+    autopilot: {
+      get: vi.fn((accountId: string) => Promise.resolve(autopilot.has(accountId))),
+      set: vi.fn((accountId: string, on: boolean) => {
+        if (!authStatus.accounts.some((a) => a.id === accountId)) {
+          return Promise.reject(new Error('That X account is not connected.'))
+        }
+        autopilotChanged(accountId, on)
+        return Promise.resolve(on)
+      }),
+      onChanged: vi.fn((listener: (e: AutopilotChanged) => void) => {
+        autopilotListeners.add(listener)
+        return () => autopilotListeners.delete(listener)
+      })
+    },
     mcp: {
       status: vi.fn(() => Promise.resolve({ ...mcpStatus })),
       setEnabled: vi.fn((enabled: boolean) => {
@@ -505,6 +533,8 @@ export function fakeApi(history: ChatMessage[] = []): FakeApi {
     sessions,
     chatMessages,
     sessionsChanged,
+    autopilot,
+    autopilotChanged,
     emit: (event) =>
       agentListeners.forEach((l) =>
         l({ accountId: null, sessionId: null, ...event } as AgentEvent)

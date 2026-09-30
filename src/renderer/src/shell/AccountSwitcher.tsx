@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from 'react'
 import { Check, ChevronsUpDown, Plus } from 'lucide-react'
 import type { AuthStatus, XAccount } from '@shared/api'
 import { authErrorMessage } from '@shared/authErrors'
+import { AutopilotBadge } from '../autopilot/AutopilotBadge'
+import { useAutopilot } from '../autopilot/useAutopilot'
 
 // One gradient per account, by its place in the list of accounts, so it keeps its colour everywhere.
 const GRADIENTS = [
@@ -83,6 +85,7 @@ export function AccountSwitcher({
   rail: boolean
 }): React.JSX.Element {
   const [open, setOpen] = useState(false)
+  const autopilot = useAutopilot(active.id)
   const wrapRef = useRef<HTMLDivElement>(null)
   const triggerRef = useRef<HTMLButtonElement>(null)
   const elsewhere = status.accounts
@@ -135,7 +138,13 @@ export function AccountSwitcher({
         {!rail && (
           <>
             <span className="flex min-w-0 flex-1 flex-col [&>*]:truncate">
-              <span className="text-[12px] font-medium text-ds-text">{accountName(active)}</span>
+              {/* Autopilot's badge by the name, when it is on (OP-104). */}
+              <span className="flex min-w-0 items-center gap-1.5">
+                <span className="min-w-0 truncate text-[12px] font-medium text-ds-text">
+                  {accountName(active)}
+                </span>
+                {autopilot.on && <AutopilotBadge />}
+              </span>
               <span className="text-[11px] text-ds-text-3">@{active.handle}</span>
             </span>
             {elsewhere > 0 && (

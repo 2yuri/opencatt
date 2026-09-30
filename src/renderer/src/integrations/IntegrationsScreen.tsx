@@ -1,5 +1,6 @@
 import { useEffect, useId, useRef, useState } from 'react'
-import { Copy, Plus, RefreshCw, ShieldCheck } from 'lucide-react'
+import { Copy, Plus, RefreshCw, ShieldCheck, Zap } from 'lucide-react'
+import { Link } from 'react-router'
 import type { McpStatus, XAccount } from '@shared/api'
 import { authErrorMessage } from '@shared/authErrors'
 import { MCP_PORT } from '@shared/mcp'
@@ -192,6 +193,7 @@ function McpRows(): React.JSX.Element {
         <>
           <SetupRow status={status} />
           <ToolsRow />
+          <AutopilotNoteRow />
           <TokenRow
             busy={busy}
             onRegenerate={() => apply(() => window.opencat.mcp.regenerateToken())}
@@ -317,8 +319,26 @@ function ToolsRow(): React.JSX.Element {
       </ul>
       <p className="m-0 flex items-center gap-2 text-[12px] text-ds-text-2">
         <ShieldCheck size={14} className="shrink-0 text-ds-amber" aria-hidden="true" />
-        Everything they create waits in Approvals until you approve it.
+        Everything they create waits in Approvals, unless the account has Autopilot on.
       </p>
+    </div>
+  )
+}
+
+/** Autopilot skips Approvals for outside agents too (OP-104); it is set in Settings. */
+function AutopilotNoteRow(): React.JSX.Element {
+  return (
+    <div className="flex items-center gap-2 px-4 py-3">
+      <Zap size={14} className="shrink-0 text-ds-amber" aria-hidden="true" />
+      <p className="m-0 min-w-0 flex-1 text-[12px] leading-[17px] text-ds-text-2">
+        On accounts with Autopilot on, posts from outside agents are scheduled straight away.
+      </p>
+      <Link
+        to="/settings#autopilot"
+        className="shrink-0 text-[12px] font-medium whitespace-nowrap text-ds-accent no-underline hover:underline"
+      >
+        Autopilot settings
+      </Link>
     </div>
   )
 }

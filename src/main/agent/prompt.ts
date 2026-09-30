@@ -78,13 +78,28 @@ export function attachmentNote(message: ChatMessage): string | null {
 
 /** Which X account the turn writes for, and the voice the user saved for it (OP-74). */
 export function accountNote(
-  account: { handle: string; name: string | null; voice?: VoiceProfile } | null
+  account: {
+    handle: string
+    name: string | null
+    voice?: VoiceProfile
+    autopilot?: boolean
+  } | null
 ): string {
   if (!account) return ''
   const who = account.name ? `${account.name} (@${account.handle})` : `@${account.handle}`
   const note = `You are writing for the X account ${who}. Every post you create, list or move is that account's; write in its voice.`
-  return account.voice ? `${note}\n\n${voiceNote(account.handle, account.voice)}` : note
+  const parts = [note]
+  if (account.autopilot) parts.push(AUTOPILOT_NOTE)
+  if (account.voice) parts.push(voiceNote(account.handle, account.voice))
+  return parts.join('\n\n')
 }
+
+/**
+ * Autopilot is on for the account (OP-103). It overrides the approval lines above for new posts,
+ * but a post that was already waiting still waits.
+ */
+const AUTOPILOT_NOTE =
+  "Autopilot is on for this account: the posts you create or change are scheduled straight away, without the user's approval, and go out at their time. Say they are scheduled, not waiting for approval. A post that was already waiting for approval still waits until the user approves it."
 
 const LANGUAGES = new Intl.DisplayNames(['en'], { type: 'language' })
 

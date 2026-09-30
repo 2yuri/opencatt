@@ -163,7 +163,9 @@ describe('Shell', () => {
     expect(voice.getAttribute('title')).toBe('Voice settings')
     fireEvent.click(voice)
     expect(await screen.findByRole('heading', { name: 'Settings' })).toBeTruthy()
-    expect(await screen.findByText('for @acme')).toBeTruthy()
+    expect(
+      await within(await screen.findByRole('region', { name: 'Voice' })).findByText('for @acme')
+    ).toBeTruthy()
     expect(document.getElementById('voice')).toBeTruthy()
   })
 })

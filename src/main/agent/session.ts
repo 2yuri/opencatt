@@ -31,6 +31,8 @@ export interface TurnAccount {
   name: string | null
   /** The voice the user saved for it (OP-74), read when the turn starts. */
   voice?: VoiceProfile
+  /** Autopilot is on for the agent here (OP-103): its posts are scheduled without approval. */
+  autopilot?: boolean
 }
 
 /**

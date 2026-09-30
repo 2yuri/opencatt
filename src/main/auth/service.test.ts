@@ -16,6 +16,7 @@ import {
   credentialName,
   type StoredCredentials
 } from './service'
+import { AutopilotStore } from '../agent/autopilot'
 import { freePort } from './testPort'
 
 const cipher = (available = true): Cipher => ({
@@ -94,6 +95,8 @@ async function setup(options: { codes?: Record<string, string>; keyring?: boolea
     void fetch(`http://127.0.0.1:${port}/callback?state=${state}&code=${code}`)
   })
   const changes: AuthStatus[] = []
+  const autopilot = new AutopilotStore(settings, (id) => accounts.get(id) !== null)
+  posts.useAutopilot((accountId, by) => autopilot.allows(accountId, by))
   const auth = new XAuthService({
     accounts,
     posts,
@@ -103,10 +106,12 @@ async function setup(options: { codes?: Record<string, string>; keyring?: boolea
     fetch: x.fetch,
     now,
     onChanged: (status) => changes.push(status),
+    onDisconnected: (accountId) => autopilot.turnOff(accountId),
     callbackPort: port
   })
   return {
     auth,
+    autopilot,
     posts,
     settings,
     credentials,
@@ -242,6 +247,29 @@ describe('XAuthService.credentialsFor', () => {
 })
 
 describe('XAuthService.disconnect', () => {
+  it("turns that account's Autopilot off, and signing in again leaves it off (OP-105)", async () => {
+    const t = await setup()
+    await t.auth.connect()
+    t.signInAs('code-bob')
+    await t.auth.connect()
+    t.autopilot.set('111', true)
+    t.autopilot.set('222', true)
+    const auto = t.posts.create(
+      { text: 'by autopilot', scheduledAt: '2026-09-28T09:00:00Z', accountId: '111' },
+      { by: 'agent' }
+    )
+
+    await t.auth.disconnect('111')
+    expect(t.autopilot.get('111')).toBe(false)
+    expect(t.autopilot.get('222')).toBe(true)
+    // What Autopilot already scheduled stays as it was.
+    expect(t.posts.get(auto.id)).toMatchObject({ status: 'scheduled', autopilot: true })
+
+    t.signInAs('code-alice')
+    await t.auth.connect()
+    expect(t.autopilot.get('111')).toBe(false)
+  })
+
   it('revokes on X and forgets the tokens, but keeps the account and its posts', async () => {
     const t = await setup()
     await t.auth.connect()

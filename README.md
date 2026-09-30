@@ -19,8 +19,8 @@ already have, or with an Anthropic API key, and nothing it writes goes out until
 OpenCatt then publishes to X at the scheduled time. Your posts, drafts and chat live in a SQLite
 file on your machine, and your X keys stay in the OS keychain.
 
-The first release, [v0.1.0](https://github.com/2yuri/opencatt/releases/tag/v0.1.0), is out for
-macOS, Windows and Linux.
+Installers for macOS, Windows and Linux are on the
+[latest release](https://github.com/2yuri/opencatt/releases/latest).
 
 ## A calendar for your next idea
 

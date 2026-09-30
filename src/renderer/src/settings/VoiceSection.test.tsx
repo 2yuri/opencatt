@@ -56,11 +56,13 @@ afterEach(() => {
 describe('Settings, Voice', () => {
   it("loads the active account's voice, right after General", async () => {
     renderScreen()
-    expect(await screen.findByText('for @acme')).toBeTruthy()
+    expect(
+      await within(await screen.findByRole('region', { name: 'Voice' })).findByText('for @acme')
+    ).toBeTruthy()
     await waitFor(() => expect(description().value).toBe('Short, plain and a bit dry.'))
     expect(fake.api.voice.get).toHaveBeenCalledWith('acme')
     const headings = screen.getAllByRole('heading', { level: 2 }).map((h) => h.textContent)
-    expect(headings).toEqual(['General', 'Voice', 'Accounts', 'Agent'])
+    expect(headings).toEqual(['General', 'Voice', 'Accounts', 'Posting', 'Agent'])
     expect(screen.getByText('We shipped the calendar today.')).toBeTruthy()
     expect(screen.getByLabelText<HTMLSelectElement>('Language').value).toBe('auto')
     expect(screen.getByRole('switch', { name: 'Emoji' }).getAttribute('aria-checked')).toBe('false')
@@ -75,7 +77,9 @@ describe('Settings, Voice', () => {
     renderScreen()
     await waitFor(() => expect(description().value).toBe('Short, plain and a bit dry.'))
     act(() => fake.authChanged({ activeAccountId: 'maria' }))
-    expect(await screen.findByText('for @maria')).toBeTruthy()
+    expect(
+      await within(await screen.findByRole('region', { name: 'Voice' })).findByText('for @maria')
+    ).toBeTruthy()
     await waitFor(() => expect(description().value).toBe('Warm and curious.'))
     expect(fake.api.voice.get).toHaveBeenLastCalledWith('maria')
     expect(screen.queryByText('We shipped the calendar today.')).toBeNull()
@@ -163,7 +167,7 @@ describe('Settings, Voice', () => {
   it('says the agent will ask first when nothing is set', async () => {
     fake.voices.delete('acme')
     renderScreen()
-    await screen.findByText('for @acme')
+    await within(await screen.findByRole('region', { name: 'Voice' })).findByText('for @acme')
     await waitFor(() =>
       expect(preview()).toBe(
         'Nothing set yet: the agent will ask you two or three questions before its first post'
@@ -181,7 +185,7 @@ describe('Settings, Voice', () => {
       scrolled.push(this)
     }
     renderScreen('/settings#voice')
-    await screen.findByText('for @acme')
+    await within(await screen.findByRole('region', { name: 'Voice' })).findByText('for @acme')
     expect(voice().tagName).toBe('SECTION')
     expect(scrolled).toContain(voice())
     delete (Element.prototype as { scrollIntoView?: unknown }).scrollIntoView

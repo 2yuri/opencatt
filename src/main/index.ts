@@ -33,6 +33,7 @@ import { offscreenRecorder } from './agent/render/recorder'
 import { videoPreface } from './agent/videoPreface'
 import { VideoPrePromptStore } from './agent/videoPrompt'
 import { VoiceStore, WritingPromptStore } from './agent/voice'
+import { AutopilotStore } from './agent/autopilot'
 import type { AssetSource } from './agent/render/assets'
 import { renderImageTool } from './agent/render/tool'
 import { renderVideoTool } from './agent/render/videoTool'
@@ -54,6 +55,7 @@ import { handleMediaProtocol, registerMediaScheme } from './media/protocol'
 import { VideoPreparer } from './media/video'
 import { OnboardingService } from './onboarding'
 import { showPendingBadge } from './badge'
+import { moveLegacyUserData } from './legacyData'
 import { openedAtLogin, upgradeLoginItem } from './loginItem'
 import { trayIconPath, windowIconPath } from './appIcons'
 import { Publisher } from './publisher'
@@ -63,15 +65,28 @@ import { XClient } from './x/client'
 
 registerMediaScheme()
 
+// Builds from before the rename kept their data in .../OpenCat; bring it over once (OP-100). This
+// must come before the single-instance lock, which is the first thing to write to userData.
+if (app.isPackaged) {
+  try {
+    const moved = moveLegacyUserData(app.getPath('appData'), app.getPath('userData'))
+    if (moved) console.info(`Moved OpenCat data into ${app.getPath('userData')}:`, moved)
+  } catch (err) {
+    console.error('Could not move the old OpenCat data folder:', err)
+  }
+}
+
 // One OpenCatt at a time: a second copy would run a second publisher and could send every due
 // post twice. A second launch just brings the first one's window forward.
 const primary = app.requestSingleInstanceLock()
 if (!primary) app.quit()
 else app.on('second-instance', () => showWindow())
 
-// The product is called OpenCatt (OP-52), but Electron derives the userData folder (the database,
-// media and credential files) and the keychain entry safeStorage encrypts with from the app name.
-// Keeping the internal name as it was means existing installs keep their posts and keys.
+// The product is called OpenCatt (OP-52). The userData folder (the database, media and credential
+// files) follows productName and is .../OpenCatt, which the move above fills from the old folder.
+// The name safeStorage encrypts with (the macOS keychain entry "OpenCat Safe Storage", libsecret
+// on Linux) follows this call instead, so it stays OpenCat and moved credentials still decrypt.
+// Never change it. On Windows the key is in userData's Local State, which moves with the folder.
 app.setName('OpenCat')
 app.setAboutPanelOptions({
   applicationName: 'OpenCatt',
@@ -195,6 +210,13 @@ void app.whenReady().then(() => {
     (accountId, profile) => broadcast(IpcEvent.VoiceChanged, { accountId, profile })
   )
   const writing = new WritingPromptStore(stores.settings)
+  // Autopilot per account (OP-103): agent and MCP posts scheduled without approval when it's on.
+  const autopilot = new AutopilotStore(
+    stores.settings,
+    (id) => stores!.accounts.get(id) !== null,
+    (accountId, on) => broadcast(IpcEvent.AutopilotChanged, { accountId, on })
+  )
+  stores.posts.useAutopilot((accountId, by) => autopilot.allows(accountId, by))
   // Pasted images with no file behind them wait here until imported (OP-89).
   const pasted = new PastedFiles(join(userData, 'pasted'))
   pasted.sweep()
@@ -206,7 +228,8 @@ void app.whenReady().then(() => {
           id: account.id,
           handle: account.handle,
           name: account.name,
-          voice: voices.get(account.id)
+          voice: voices.get(account.id),
+          autopilot: autopilot.get(account.id)
         }
       : null
   }
@@ -359,6 +382,8 @@ void app.whenReady().then(() => {
     settings: stores.settings,
     credentials,
     openBrowser: (url) => shell.openExternal(url),
+    // Autopilot doesn't outlive a disconnect (OP-105).
+    onDisconnected: (accountId) => autopilot.turnOff(accountId),
     onChanged: (status) => {
       // The conversation from before any account goes to the first one, like its posts do.
       if (status.activeAccountId) {
@@ -399,7 +424,7 @@ void app.whenReady().then(() => {
         }
       }
     },
-    { prePrompt, voices, writing, pasted }
+    { prePrompt, voices, writing, pasted, autopilot }
   )
   // Posts go out at their time from here (OP-10), each as its own account (OP-5, OP-6).
   const x = new XClient({

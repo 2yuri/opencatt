@@ -251,6 +251,10 @@ export const migrations: string[] = [
   UPDATE chat_messages
     SET session_id = (SELECT s.id FROM chat_sessions s WHERE s.account_id IS chat_messages.account_id);
   CREATE INDEX chat_messages_session ON chat_messages (session_id, created_at);
+  `,
+  // 16: the post was scheduled by Autopilot (OP-103), not approved by the user, so cards can say so.
+  `
+  ALTER TABLE posts ADD COLUMN autopilot INTEGER NOT NULL DEFAULT 0;
   `
 ]
 

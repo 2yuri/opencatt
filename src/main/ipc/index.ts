@@ -20,6 +20,7 @@ import { getOpenAtLogin, setOpenAtLogin } from '../loginItem'
 import { SUPPORTED_EXTENSIONS } from '../media/files'
 import type { MediaImports } from '../media/imports'
 import type { PastedFiles } from '../media/pasted'
+import type { AutopilotStore } from '../agent/autopilot'
 import type { OnboardingService } from '../onboarding'
 import { ping } from '../ping'
 import { showPendingBadge } from '../badge'
@@ -40,9 +41,16 @@ export function registerIpc(
     voices?: VoiceStore
     writing?: WritingPromptStore
     pasted?: PastedFiles
+    autopilot?: AutopilotStore
   } = {}
 ): void {
-  const { prePrompt, voices, writing, pasted } = extras
+  const { prePrompt, voices, writing, pasted, autopilot } = extras
+  if (autopilot) {
+    ipcMain.handle(IpcChannel.AutopilotGet, (_e, accountId) => autopilot.get(String(accountId)))
+    ipcMain.handle(IpcChannel.AutopilotSet, (_e, accountId, on) =>
+      autopilot.set(String(accountId), on === true)
+    )
+  }
   ipcMain.handle(IpcChannel.Ping, () => ping(process.versions.electron, process.platform))
   // The OS region, not the UI language: an English system set to Germany starts on Monday.
   ipcMain.handle(IpcChannel.LocaleWeekStart, () => weekStartFor(app.getSystemLocale()))

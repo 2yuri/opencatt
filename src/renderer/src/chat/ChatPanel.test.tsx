@@ -81,7 +81,8 @@ describe('ChatPanel', () => {
     const scheduled = post({
       id: 'p1',
       text: 'Launch day!',
-      scheduledAt: '2026-09-28T08:00:00Z',
+      // Tomorrow, whenever the test runs: a past time shows "Time passed" instead.
+      scheduledAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
       status: 'pending_approval'
     })
     fake.posts.set('p1', scheduled)

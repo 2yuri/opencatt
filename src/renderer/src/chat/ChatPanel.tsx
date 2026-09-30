@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useId, useRef, useState } from 'react'
 import {
+  AtSign,
   AudioLines,
   ChevronDown,
   Film,
@@ -11,7 +12,10 @@ import {
   SquarePen,
   Trash2
 } from 'lucide-react'
-import type { AgentStatus, ChatMessage, Post } from '@shared/api'
+import type { AgentStatus, ChatMessage, Post, XAccount } from '@shared/api'
+import { AutopilotBadge } from '../autopilot/AutopilotBadge'
+import { AutopilotSwitch } from '../autopilot/AutopilotSwitch'
+import { useAutopilot, type Autopilot } from '../autopilot/useAutopilot'
 import { AgentSettingsForm } from './AgentSettingsForm'
 import { onOpenAgentSettings } from './agentSettingsRequest'
 import { INSTALL_URL, LOGIN_COMMAND, planName } from './agentSetup'
@@ -217,7 +221,9 @@ function Conversation({
   const answeringElsewhere =
     sessions.list.find((s) => s.streaming && s.id !== sessions.current?.id) ?? null
   // The same lock across accounts: a turn for another account shows up only in the events.
-  const { status: authStatus } = useActiveAccount()
+  const { status: authStatus, active: activeAccount } = useActiveAccount()
+  // The active account's Autopilot (OP-104): the bar under the header and the badge in it.
+  const autopilot = useAutopilot(activeAccount?.id)
   // A turn already running for another account when the panel opened sends no event until its
   // next step, so ask main which turn runs, once and again when another account's chats change.
   // Not by listing their chats: main makes a first chat for an account that has none.
@@ -407,7 +413,14 @@ function Conversation({
               <ChevronDown size={14} className="shrink-0 text-ds-text-3" aria-hidden="true" />
             </button>
           </h2>
-          {status && <ProviderPill status={status} handle={sessions.handle} />}
+          {status && (
+            <ProviderPill
+              status={status}
+              // The Autopilot bar shows the account, when there is one (OP-104).
+              handle={activeAccount ? null : sessions.handle}
+              autopilot={autopilot.on === true}
+            />
+          )}
         </span>
         {confirmClear ? (
           <span className="flex items-center gap-1.5 text-[12px] text-ds-text-2">
@@ -479,6 +492,7 @@ function Conversation({
           </span>
         )}
       </header>
+      {activeAccount && <AutopilotBar account={activeAccount} autopilot={autopilot} />}
       {menuOpen && (
         <SessionMenu
           sessions={sessions.list}
@@ -733,14 +747,58 @@ function Message({
   return <div className={message.role === 'user' ? USER : ASSISTANT}>{message.content}</div>
 }
 
+/**
+ * The thin bar under the header (Pencil "OP-104 · 1"): the active account, and its Autopilot
+ * switch. A refused change shows under it, in red.
+ */
+function AutopilotBar({
+  account,
+  autopilot
+}: {
+  account: XAccount
+  autopilot: Autopilot
+}): React.JSX.Element {
+  const labelId = useId()
+  return (
+    <div className="shrink-0 border-b border-ds-border px-4">
+      <div className="flex h-[35px] items-center gap-2">
+        <span className="flex min-w-0 items-center gap-1.5 text-[12px] font-medium text-ds-text-2">
+          <AtSign size={14} className="shrink-0 text-ds-text-3" aria-hidden="true" />
+          <span className="min-w-0 truncate">{account.handle}</span>
+        </span>
+        <span className="flex-1" />
+        <span className="flex shrink-0 items-center gap-2">
+          <span id={labelId} className="text-[12px] font-medium text-ds-text-2">
+            Autopilot
+          </span>
+          <AutopilotSwitch
+            account={account}
+            autopilot={autopilot}
+            size="sm"
+            aria-labelledby={labelId}
+          />
+        </span>
+      </div>
+      {autopilot.error && (
+        <p role="alert" className="m-0 pb-2 text-right text-[12px] leading-[1.45] text-ds-red">
+          {autopilot.error}
+        </p>
+      )}
+    </div>
+  )
+}
+
 /** Who answers the next message, and whether it can. */
 function ProviderPill({
   status,
-  handle
+  handle,
+  autopilot
 }: {
   status: AgentStatus
-  /** The active X account, whose chats these are (OP-95). */
+  /** The active X account, whose chats these are (OP-95); null when the Autopilot bar shows it. */
   handle: string | null
+  /** The active account has Autopilot on (OP-104). */
+  autopilot: boolean
 }): React.JSX.Element {
   const cli = status.provider === 'cli'
   const label = cli ? 'Claude Code' : status.hasKey ? 'API key' : 'Not set up'
@@ -754,7 +812,7 @@ function ProviderPill({
       : 'The agent is not set up yet'
   return (
     <span
-      className="provider-pill flex max-w-full min-w-0 items-center gap-[5px] text-[11px] text-ds-text-3"
+      className="provider-pill flex max-w-full min-w-0 items-center gap-[5px] text-[11px] whitespace-nowrap text-ds-text-3"
       data-state={state}
       title={title}
     >
@@ -765,6 +823,7 @@ function ProviderPill({
       {label}
       {/* A span of its own, so a long handle is cut rather than the provider. */}
       {handle && <span className="-ml-[5px] min-w-0 truncate">&nbsp;· @{handle}</span>}
+      {autopilot && <AutopilotBadge className="ml-[1px]" />}
     </span>
   )
 }

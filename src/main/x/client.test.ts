@@ -49,6 +49,7 @@ const post = (parts: PostPart[], accountId: string | null = 'acct'): Post => ({
   id: 'post-1',
   accountId,
   createdBy: 'user',
+  autopilot: false,
   text: parts[0]!.text,
   parts,
   scheduledAt: '2026-09-28T09:00:00.000Z',

@@ -4,6 +4,7 @@ import {
   IpcEvent,
   type AgentEvent,
   type AuthStatus,
+  type AutopilotChanged,
   type ChatSessionsChanged,
   type MediaProgressEvent,
   type OpenCatApi,
@@ -87,6 +88,15 @@ const api: OpenCatApi = {
     getPrePrompt: () => ipcRenderer.invoke(IpcChannel.VideoPrePromptGet),
     setPrePrompt: (text) => ipcRenderer.invoke(IpcChannel.VideoPrePromptSet, text),
     resetPrePrompt: () => ipcRenderer.invoke(IpcChannel.VideoPrePromptReset)
+  },
+  autopilot: {
+    get: (accountId) => ipcRenderer.invoke(IpcChannel.AutopilotGet, accountId),
+    set: (accountId, on) => ipcRenderer.invoke(IpcChannel.AutopilotSet, accountId, on),
+    onChanged: (listener) => {
+      const handler = (_e: IpcRendererEvent, event: AutopilotChanged): void => listener(event)
+      ipcRenderer.on(IpcEvent.AutopilotChanged, handler)
+      return () => ipcRenderer.off(IpcEvent.AutopilotChanged, handler)
+    }
   },
   voice: {
     get: (accountId) => ipcRenderer.invoke(IpcChannel.VoiceGet, accountId),

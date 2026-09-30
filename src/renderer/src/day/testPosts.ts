@@ -7,6 +7,7 @@ export function makePost(fields: Partial<Post> & Pick<Post, 'id'>): Post {
     accountId: null,
     nextAttemptAt: null,
     createdBy: 'user',
+    autopilot: false,
     text: `post ${fields.id}`,
     scheduledAt: '2026-09-28T09:00:00.000Z',
     status: 'scheduled',

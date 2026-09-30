@@ -29,6 +29,8 @@ export const IpcChannel = {
   ChatSessionsRename: 'chat:sessions:rename',
   ChatSessionsDelete: 'chat:sessions:delete',
   ChatSessionsSetActive: 'chat:sessions:setActive',
+  AutopilotGet: 'autopilot:get',
+  AutopilotSet: 'autopilot:set',
   AgentSend: 'agent:send',
   AgentCapabilities: 'agent:capabilities',
   VideoPrePromptGet: 'video:prePrompt:get',
@@ -81,6 +83,8 @@ export const IpcEvent = {
   AuthChanged: 'auth:changed',
   /** An account's chats changed: made, renamed, deleted, switched or given a title (OP-94). */
   ChatSessionsChanged: 'chat:sessions:changed',
+  /** An account's Autopilot was turned on or off: { accountId, on } (OP-103). */
+  AutopilotChanged: 'autopilot:changed',
   /** An account's voice was saved: { accountId, profile }. */
   VoiceChanged: 'voice:changed'
 } as const
@@ -151,8 +155,10 @@ export interface Post {
   id: string
   /** X user id of the account it posts as; null until an account is connected. */
   accountId: string | null
-  /** Who created it. Anything not from the user starts as pending_approval. */
+  /** Who created it. Anything not from the user starts as pending_approval, unless Autopilot. */
   createdBy: PostAuthor
+  /** Autopilot scheduled it without the user's approval (OP-103). */
+  autopilot: boolean
   /** The first part's text, for cards and lists. */
   text: string
   /** Always at least one part, in order. */
@@ -314,6 +320,23 @@ export interface ChatSession {
   active: boolean
   /** The agent is answering in it right now. */
   streaming: boolean
+}
+
+/** Autopilot for an X account turned on or off (OP-103). */
+export interface AutopilotChanged {
+  accountId: string
+  on: boolean
+}
+
+/**
+ * Autopilot per X account (OP-103): when on, posts from the in-app agent and from outside agents
+ * over MCP are scheduled without waiting for approval. Off by default.
+ */
+export interface AutopilotApi {
+  get(accountId: string): Promise<boolean>
+  /** Rejects with a plain message, like an account that isn't connected. New posts only. */
+  set(accountId: string, on: boolean): Promise<boolean>
+  onChanged(listener: (event: AutopilotChanged) => void): () => void
 }
 
 export interface ChatSessionsChanged {
@@ -694,6 +717,7 @@ export interface OpenCatApi {
   agent: AgentApi
   video: VideoApi
   voice: VoiceApi
+  autopilot: AutopilotApi
   mcp: McpApi
   media: MediaApi
   onboarding: OnboardingApi

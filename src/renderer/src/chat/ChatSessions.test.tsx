@@ -56,13 +56,16 @@ async function openMenu(title = 'Launch week ideas'): Promise<HTMLElement> {
 const input = (): HTMLTextAreaElement => screen.getByLabelText('Message the agent')
 
 describe('ChatPanel chats (OP-95)', () => {
-  it('titles the header with the open chat and adds the account to the status line', async () => {
+  it('titles the header with the open chat, and shows the account in the Autopilot bar', async () => {
     setup()
     render(<ChatPanel />)
     expect(await titleButton('Launch week ideas')).toBeTruthy()
     expect(await screen.findByText('Ideas for launch week')).toBeTruthy()
+    // The bar under the header names the account, so the status line doesn't (OP-104).
+    expect(await screen.findByRole('switch', { name: 'Autopilot' })).toBeTruthy()
+    expect(screen.getByText('acme')).toBeTruthy()
     await waitFor(() =>
-      expect(document.querySelector('.provider-pill')?.textContent).toBe('API key · @acme')
+      expect(document.querySelector('.provider-pill')?.textContent).toBe('API key')
     )
     const pen = screen.getByRole('button', { name: 'New chat' })
     expect(pen.getAttribute('title')).toBe('New chat (Ctrl+N)')

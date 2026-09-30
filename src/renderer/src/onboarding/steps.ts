@@ -26,7 +26,7 @@ export const portalSteps: PortalStep[] = [
     id: 'project',
     title: "Check your project's plan",
     detail:
-      'Open "Projects": each project shows its plan, like "My project · Pay Per Use". Posting needs Pay Per Use or higher; the Free plan can\'t post.',
+      'Open "Projects": each project shows its plan, like "My project · Pay Per Use". Posting needs Pay Per Use or higher; the Free plan can\'t post. A post with a link costs much more than one without.',
     link: { label: "X's pricing", url: XLinks.pricing }
   },
   {
@@ -46,7 +46,7 @@ export const portalSteps: PortalStep[] = [
     id: 'oauth2-setup',
     title: "Open the app's authentication settings",
     detail:
-      'On the app\'s page, click "Settings" (on a brand-new app it can be "Setup" under OAuth 2.0 Keys). This is where X asks how OpenCatt signs in as you.',
+      'On the app\'s page, click "Setup" under OAuth 2.0 Keys (on an older app it\'s the "Settings" button). This is where X asks how OpenCatt signs in as you.',
     link: { label: 'How X explains it', url: XLinks.appsGuide }
   },
   {

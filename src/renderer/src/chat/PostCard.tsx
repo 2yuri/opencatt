@@ -1,7 +1,8 @@
-import { useEffect, useState } from 'react'
+import { useContext, useEffect, useState } from 'react'
 import { format } from 'date-fns'
-import { CalendarClock, Check, Film, ListOrdered } from 'lucide-react'
+import { CalendarClock, Check, Film, ListOrdered, Zap } from 'lucide-react'
 import { MISSED_AFTER_MS, type Post, type PostsToolResult } from '@shared/api'
+import { EditorContext } from '../editor/editorContext'
 import { ViewButton } from '../media/ViewButton'
 import { useMediaViewer, viewerItemsForPost } from '../media/viewerContext'
 import { messageOf } from './useAgentChat'
@@ -78,7 +79,10 @@ export function PostCard({
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [newTime, setNewTime] = useState<string | null>(null)
+  const [confirmDelete, setConfirmDelete] = useState(false)
   const viewer = useMediaViewer()
+  // Optional, so the card still draws where no editor is set up; Edit then opens the post's day.
+  const editor = useContext(EditorContext)
 
   useEffect(() => {
     if (action === 'deleted') return
@@ -136,6 +140,20 @@ export function PostCard({
     }
   }
 
+  const remove = async (): Promise<void> => {
+    setBusy(true)
+    setError(null)
+    try {
+      // The card shows it as deleted through posts:changed.
+      await window.opencat.posts.delete(post.id)
+    } catch (err) {
+      setError(messageOf(err))
+      setBusy(false)
+    }
+  }
+
+  // Scheduled by Autopilot, without asking (OP-104): it can still be edited or deleted.
+  const byAutopilot = post.autopilot && post.status === 'scheduled'
   const state = timePassed ? 'time-passed' : post.status
   return (
     <article
@@ -145,16 +163,23 @@ export function PostCard({
     >
       <div className="flex gap-3">
         <div className="flex min-w-0 flex-1 flex-col gap-1.5">
-          {/* The date stays on one line; when the row is too narrow the pill drops below it. */}
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="font-mono text-[11px] tracking-[0.3px] whitespace-nowrap text-ds-text-3 uppercase">
-              {WHEN.format(at)}
-            </span>
-            <span className="flex-1" />
-            <Pill tone={timePassed ? 'neutral' : PILL[post.status]}>
-              {timePassed ? 'Time passed' : STATUS[post.status]}
-            </Pill>
-          </div>
+          {byAutopilot ? (
+            <div className="flex items-center gap-1.5 text-[11px] font-medium text-ds-text-2">
+              <Zap size={12} className="shrink-0 text-ds-amber" aria-hidden="true" />
+              Scheduled by Autopilot · {WHEN.format(at)}
+            </div>
+          ) : (
+            // The date stays on one line; when the row is too narrow the pill drops below it.
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="font-mono text-[11px] tracking-[0.3px] whitespace-nowrap text-ds-text-3 uppercase">
+                {WHEN.format(at)}
+              </span>
+              <span className="flex-1" />
+              <Pill tone={timePassed ? 'neutral' : PILL[post.status]}>
+                {timePassed ? 'Time passed' : STATUS[post.status]}
+              </Pill>
+            </div>
+          )}
           <p
             className={`m-0 text-[13px] leading-[1.5] [overflow-wrap:anywhere] ${post.status === 'rejected' ? 'text-ds-text-3 line-through' : ''}`}
           >
@@ -206,7 +231,51 @@ export function PostCard({
         )}
       </div>
 
-      {newTime !== null ? (
+      {byAutopilot ? (
+        confirmDelete ? (
+          <div className="flex flex-wrap items-center gap-1.5 pt-0.5">
+            <span className="mr-1 text-[12px] font-medium text-ds-text-2">Delete this post?</span>
+            <Button
+              type="button"
+              variant="danger"
+              size="sm"
+              disabled={busy}
+              onClick={() => void remove()}
+            >
+              Delete
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              disabled={busy}
+              onClick={() => setConfirmDelete(false)}
+            >
+              Keep
+            </Button>
+          </div>
+        ) : (
+          <div className="flex items-center gap-1.5 pt-0.5">
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              onClick={() => (editor ? editor.openPost(post) : onOpen?.(post))}
+            >
+              Edit
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="!text-ds-red"
+              onClick={() => setConfirmDelete(true)}
+            >
+              Delete
+            </Button>
+          </div>
+        )
+      ) : newTime !== null ? (
         <form
           className="flex flex-wrap items-center gap-1.5"
           onSubmit={(e) => {

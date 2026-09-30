@@ -55,7 +55,8 @@ export function Welcome({ onNext }: { onNext: () => void }): React.JSX.Element {
         data-testid="cost-note"
       >
         <Info size={14} className="shrink-0" aria-hidden="true" />
-        Posting needs a paid plan on X's API, Pay Per Use or higher; the free plan can't post.
+        Posting needs a paid plan on X's API, Pay Per Use or higher; the free plan can't post. A
+        post with a link costs much more than one without.
         <a
           href={XLinks.pricing}
           target="_blank"

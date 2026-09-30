@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { MemoryRouter } from 'react-router'
 import { AuthError } from '@shared/authErrors'
 import { fakeApi, xAccount, type FakeApi } from '../test/fakeApi'
 import { IntegrationsScreen } from './IntegrationsScreen'
@@ -10,7 +11,11 @@ function renderScreen(setup?: (fake: FakeApi) => void): FakeApi {
   const fake = fakeApi([])
   setup?.(fake)
   window.opencat = fake.api
-  render(<IntegrationsScreen />)
+  render(
+    <MemoryRouter>
+      <IntegrationsScreen />
+    </MemoryRouter>
+  )
   return fake
 }
 
@@ -53,7 +58,7 @@ describe('IntegrationsScreen, MCP server', () => {
       'current_time',
       'list_accounts'
     ])
-    expect(screen.getByText(/waits in Approvals until you approve it/)).toBeTruthy()
+    expect(screen.getByText(/waits in Approvals, unless the account has Autopilot on/)).toBeTruthy()
     expect(screen.getByText('Access token')).toBeTruthy()
 
     fireEvent.click(mcpSwitch())
