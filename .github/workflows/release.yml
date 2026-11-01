@@ -99,6 +99,39 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
 
+      # One temporary keychain holds the certificate for electron-builder and for the DMG step.
+      # electron-builder gets it through CSC_KEYCHAIN rather than CSC_LINK: importing CSC_LINK
+      # into its own keychain fails on the runners (set-key-partition-list: "SecKeychainUnlock:
+      # The user name or passphrase you entered is not correct").
+      - name: Import the Developer ID certificate into a temporary keychain
+        id: mac-keychain
+        if: steps.mac-signing.outputs.signed == 'true'
+        env:
+          P12: ${{ steps.mac-signing.outputs.p12 }}
+          P12_PASSWORD: ${{ secrets.DEVELOPER_ID_P12_PASSWORD }}
+        run: |
+          keychain="$RUNNER_TEMP/mac-signing/signing.keychain-db"
+          keychain_password="$(openssl rand -hex 16)"
+          echo "::add-mask::$keychain_password"
+          security create-keychain -p "$keychain_password" "$keychain"
+          security set-keychain-settings -lut 21600 "$keychain"
+          security unlock-keychain -p "$keychain_password" "$keychain"
+          security import "$P12" -k "$keychain" -P "$P12_PASSWORD" -T /usr/bin/codesign -T /usr/bin/security
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$keychain_password" "$keychain" >/dev/null
+          rm -f "$P12"
+          existing=()
+          while IFS= read -r line; do
+            line="${line#"${line%%[![:space:]]*}"}"
+            existing+=("${line//\"/}")
+          done < <(security list-keychains -d user)
+          security list-keychains -d user -s "$keychain" "${existing[@]}"
+          if ! security find-identity -v -p codesigning "$keychain" | grep -qF "Developer ID Application: $MAC_IDENTITY"; then
+            echo "::error title=Developer ID certificate not found::The .p12 in DEVELOPER_ID_P12_BASE64 has no valid \"Developer ID Application: $MAC_IDENTITY\" identity with its private key."
+            security find-identity -v -p codesigning "$keychain"
+            exit 1
+          fi
+          echo "keychain=$keychain" >> "$GITHUB_OUTPUT"
+
       # electron-builder signs every binary in the app with the hardened runtime and a secure
       # timestamp, notarizes and staples the .app, then packs it into the ZIP (what the updater
       # downloads) and the DMG. electron-builder.yml stays ad-hoc for local builds, so the
@@ -114,8 +147,7 @@ jobs:
           -c.mac.entitlementsInherit=build/entitlements.mac.hardened.plist
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          CSC_LINK: ${{ steps.mac-signing.outputs.p12 }}
-          CSC_KEY_PASSWORD: ${{ secrets.DEVELOPER_ID_P12_PASSWORD }}
+          CSC_KEYCHAIN: ${{ steps.mac-keychain.outputs.keychain }}
           APPLE_API_KEY: ${{ steps.mac-signing.outputs.p8 }}
           APPLE_API_KEY_ID: ${{ secrets.NOTARY_KEY_ID }}
           APPLE_API_ISSUER: ${{ secrets.NOTARY_ISSUER_ID }}
@@ -126,27 +158,13 @@ jobs:
       - name: Sign, notarize and staple the DMGs
         if: steps.mac-signing.outputs.signed == 'true'
         env:
-          P12: ${{ steps.mac-signing.outputs.p12 }}
-          P12_PASSWORD: ${{ secrets.DEVELOPER_ID_P12_PASSWORD }}
+          KEYCHAIN: ${{ steps.mac-keychain.outputs.keychain }}
           P8: ${{ steps.mac-signing.outputs.p8 }}
           NOTARY_KEY_ID: ${{ secrets.NOTARY_KEY_ID }}
           NOTARY_ISSUER_ID: ${{ secrets.NOTARY_ISSUER_ID }}
         run: |
-          keychain="$RUNNER_TEMP/mac-signing/dmg.keychain-db"
-          keychain_password="$(openssl rand -hex 16)"
-          security create-keychain -p "$keychain_password" "$keychain"
-          security set-keychain-settings -lut 3600 "$keychain"
-          security unlock-keychain -p "$keychain_password" "$keychain"
-          security import "$P12" -k "$keychain" -P "$P12_PASSWORD" -T /usr/bin/codesign
-          security set-key-partition-list -S apple-tool:,apple: -k "$keychain_password" "$keychain" >/dev/null
-          existing=()
-          while IFS= read -r line; do
-            line="${line#"${line%%[![:space:]]*}"}"
-            existing+=("${line//\"/}")
-          done < <(security list-keychains -d user)
-          security list-keychains -d user -s "$keychain" "${existing[@]}"
           for dmg in release/*.dmg; do
-            codesign --force --sign "Developer ID Application: $MAC_IDENTITY" --keychain "$keychain" --timestamp "$dmg"
+            codesign --force --sign "Developer ID Application: $MAC_IDENTITY" --keychain "$KEYCHAIN" --timestamp "$dmg"
             result=$(xcrun notarytool submit "$dmg" --key "$P8" --key-id "$NOTARY_KEY_ID" \
               --issuer "$NOTARY_ISSUER_ID" --wait --output-format json) || true
             echo "$result"
@@ -188,7 +206,7 @@ jobs:
       - name: Remove the signing files
         if: always() && runner.os == 'macOS'
         run: |
-          security delete-keychain "$RUNNER_TEMP/mac-signing/dmg.keychain-db" 2>/dev/null || true
+          security delete-keychain "$RUNNER_TEMP/mac-signing/signing.keychain-db" 2>/dev/null || true
           rm -rf "$RUNNER_TEMP/mac-signing"
       - name: The packaged ffmpeg encodes H.264
         shell: bash

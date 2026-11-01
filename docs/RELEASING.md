@@ -30,18 +30,20 @@ an **Unsigned macOS build** warning. Setting only some of them fails the macOS j
 
 ## What the macOS job does with the secrets
 
-1. electron-builder (`pnpm dist:mac` with the Developer ID settings on the command line; see the
-   **Build, sign and notarize macOS installers** step) imports the `.p12` into a temporary keychain,
-   signs every binary in the app with the hardened runtime and a secure timestamp, and uses
+1. The workflow imports the `.p12` into a temporary keychain it creates, adds it to the keychain
+   search list and checks that it holds the Developer ID Application identity.
+2. electron-builder (`pnpm dist:mac` with the Developer ID settings on the command line and
+   `CSC_KEYCHAIN` pointing at that keychain; see the **Build, sign and notarize macOS installers**
+   step) signs every binary in the app with the hardened runtime and a secure timestamp, and uses
    `build/entitlements.mac.hardened.plist` (only `com.apple.security.cs.allow-jit`, which V8
    needs). It notarizes the `.app` with the API key and staples it, then packs it into the ZIP (the
    file the updater downloads) and the DMG.
-2. The DMGs are signed (with a timestamp), notarized and stapled.
+3. The DMGs are signed from the same keychain (with a timestamp), notarized and stapled.
    `scripts/refresh-dmg-update-info.mjs` then rewrites their `.blockmap` and their sha512 and size in
    `latest-mac.yml`, because stapling changes the file.
-3. The job checks both apps, the apps inside both ZIPs, and both DMGs with
+4. The job checks both apps, the apps inside both ZIPs, and both DMGs with
    `codesign --verify --deep --strict`, `xcrun stapler validate` and `spctl --assess`.
-4. The keychain and the decoded key files are deleted.
+5. The keychain and the decoded key files are deleted, even when the job fails.
 
 `electron-builder.yml` itself stays ad-hoc (`identity: '-'`), so `pnpm dist:mac` works on any Mac
 without the certificate.
@@ -93,7 +95,7 @@ Xcode's cloud-managed certificate can't be exported, so create one with a local 
 
 - **Incomplete macOS signing secrets**: one or more of the five secrets is empty. Set all of
   them, or remove all of them to release unsigned.
-- **Identity name is specified, but no valid identity with this name**: the `.p12` isn't a
+- **Developer ID certificate not found**: the `.p12` isn't a
   Developer ID Application certificate for `MAC_IDENTITY`, or it was exported without its private
   key (export it from My Certificates, not Certificates).
 - **Notarization failed**: the step prints Apple's log for the submission, which names each file
