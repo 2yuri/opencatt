@@ -3,6 +3,8 @@ name: Release
 # Push a tag like v0.1.0 to build installers on every OS and attach them to a draft release.
 # The tag must match package.json's version. Publishing the draft is what makes it an update:
 # the apps only see published releases (src/main/updates.ts).
+# macOS builds are signed with the Developer ID, notarized and stapled when the signing secrets
+# are set, and ad-hoc signed as before (with a warning) when they aren't: docs/RELEASING.md.
 on:
   push:
     tags: ['v*']
@@ -30,6 +32,9 @@ jobs:
             encoder: libopenh264
             smoke: release/linux-unpacked/resources/ffmpeg/ffmpeg
     runs-on: ${{ matrix.os }}
+    env:
+      # The "Developer ID Application" certificate, without that prefix (electron-builder adds it).
+      MAC_IDENTITY: YURI ALVES MIGUEL (RQTYDUV329)
     steps:
       - uses: actions/checkout@v5
       - name: The tag matches package.json's version
@@ -47,9 +52,162 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm test
       # dist:* fetches the LGPL ffmpeg + ffprobe it ships (OP-62); the repo may be private.
-      - run: pnpm ${{ matrix.dist }}
+      - if: runner.os != 'macOS'
+        run: pnpm ${{ matrix.dist }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # macOS signing (docs/RELEASING.md). With none of the secrets (a fork, or before they're
+      # added) the build is ad-hoc signed exactly as before; with only some it fails.
+      - name: macOS signing secrets
+        id: mac-signing
+        if: runner.os == 'macOS'
+        shell: bash
+        env:
+          DEVELOPER_ID_P12_BASE64: ${{ secrets.DEVELOPER_ID_P12_BASE64 }}
+          DEVELOPER_ID_P12_PASSWORD: ${{ secrets.DEVELOPER_ID_P12_PASSWORD }}
+          NOTARY_KEY_P8_BASE64: ${{ secrets.NOTARY_KEY_P8_BASE64 }}
+          NOTARY_KEY_ID: ${{ secrets.NOTARY_KEY_ID }}
+          NOTARY_ISSUER_ID: ${{ secrets.NOTARY_ISSUER_ID }}
+        run: |
+          names=(DEVELOPER_ID_P12_BASE64 DEVELOPER_ID_P12_PASSWORD NOTARY_KEY_P8_BASE64 NOTARY_KEY_ID NOTARY_ISSUER_ID)
+          missing=()
+          for name in "${names[@]}"; do [ -n "${!name}" ] || missing+=("$name"); done
+          if [ ${#missing[@]} -eq ${#names[@]} ]; then
+            echo "::warning title=Unsigned macOS build::The Developer ID secrets aren't set, so the macOS app is ad-hoc signed and not notarized: Gatekeeper warns on first launch. See docs/RELEASING.md."
+            echo "signed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [ ${#missing[@]} -gt 0 ]; then
+            echo "::error title=Incomplete macOS signing secrets::Set all of ${names[*]} or none. Missing: ${missing[*]}."
+            exit 1
+          fi
+          dir="$RUNNER_TEMP/mac-signing"
+          mkdir -p "$dir"
+          echo "$DEVELOPER_ID_P12_BASE64" | base64 --decode > "$dir/developer-id.p12"
+          echo "$NOTARY_KEY_P8_BASE64" | base64 --decode > "$dir/notary.p8"
+          {
+            echo "signed=true"
+            echo "p12=$dir/developer-id.p12"
+            echo "p8=$dir/notary.p8"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Build macOS installers (ad-hoc signed)
+        if: runner.os == 'macOS' && steps.mac-signing.outputs.signed != 'true'
+        run: pnpm ${{ matrix.dist }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+
+      # One temporary keychain holds the certificate for electron-builder and for the DMG step.
+      # electron-builder gets it through CSC_KEYCHAIN rather than CSC_LINK: importing CSC_LINK
+      # into its own keychain fails on the runners (set-key-partition-list: "SecKeychainUnlock:
+      # The user name or passphrase you entered is not correct").
+      - name: Import the Developer ID certificate into a temporary keychain
+        id: mac-keychain
+        if: steps.mac-signing.outputs.signed == 'true'
+        env:
+          P12: ${{ steps.mac-signing.outputs.p12 }}
+          P12_PASSWORD: ${{ secrets.DEVELOPER_ID_P12_PASSWORD }}
+        run: |
+          keychain="$RUNNER_TEMP/mac-signing/signing.keychain-db"
+          keychain_password="$(openssl rand -hex 16)"
+          echo "::add-mask::$keychain_password"
+          security create-keychain -p "$keychain_password" "$keychain"
+          security set-keychain-settings -lut 21600 "$keychain"
+          security unlock-keychain -p "$keychain_password" "$keychain"
+          security import "$P12" -k "$keychain" -P "$P12_PASSWORD" -T /usr/bin/codesign -T /usr/bin/security
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$keychain_password" "$keychain" >/dev/null
+          rm -f "$P12"
+          existing=()
+          while IFS= read -r line; do
+            line="${line#"${line%%[![:space:]]*}"}"
+            existing+=("${line//\"/}")
+          done < <(security list-keychains -d user)
+          security list-keychains -d user -s "$keychain" "${existing[@]}"
+          if ! security find-identity -v -p codesigning "$keychain" | grep -qF "Developer ID Application: $MAC_IDENTITY"; then
+            echo "::error title=Developer ID certificate not found::The .p12 in DEVELOPER_ID_P12_BASE64 has no valid \"Developer ID Application: $MAC_IDENTITY\" identity with its private key."
+            security find-identity -v -p codesigning "$keychain"
+            exit 1
+          fi
+          echo "keychain=$keychain" >> "$GITHUB_OUTPUT"
+
+      # electron-builder signs every binary in the app with the hardened runtime and a secure
+      # timestamp, notarizes and staples the .app, then packs it into the ZIP (what the updater
+      # downloads) and the DMG. electron-builder.yml stays ad-hoc for local builds, so the
+      # Developer ID settings are passed here.
+      - name: Build, sign and notarize macOS installers
+        if: steps.mac-signing.outputs.signed == 'true'
+        run: >-
+          pnpm run ${{ matrix.dist }}
+          -c.forceCodeSigning=true
+          -c.mac.identity="$MAC_IDENTITY"
+          -c.mac.hardenedRuntime=true
+          -c.mac.entitlements=build/entitlements.mac.hardened.plist
+          -c.mac.entitlementsInherit=build/entitlements.mac.hardened.plist
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CSC_KEYCHAIN: ${{ steps.mac-keychain.outputs.keychain }}
+          APPLE_API_KEY: ${{ steps.mac-signing.outputs.p8 }}
+          APPLE_API_KEY_ID: ${{ secrets.NOTARY_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.NOTARY_ISSUER_ID }}
+
+      # The DMGs themselves: electron-builder doesn't notarize them, and signs them without a
+      # timestamp. Stapling changes their bytes, so their blockmaps and latest-mac.yml entries are
+      # rewritten afterwards.
+      - name: Sign, notarize and staple the DMGs
+        if: steps.mac-signing.outputs.signed == 'true'
+        env:
+          KEYCHAIN: ${{ steps.mac-keychain.outputs.keychain }}
+          P8: ${{ steps.mac-signing.outputs.p8 }}
+          NOTARY_KEY_ID: ${{ secrets.NOTARY_KEY_ID }}
+          NOTARY_ISSUER_ID: ${{ secrets.NOTARY_ISSUER_ID }}
+        run: |
+          for dmg in release/*.dmg; do
+            codesign --force --sign "Developer ID Application: $MAC_IDENTITY" --keychain "$KEYCHAIN" --timestamp "$dmg"
+            result=$(xcrun notarytool submit "$dmg" --key "$P8" --key-id "$NOTARY_KEY_ID" \
+              --issuer "$NOTARY_ISSUER_ID" --wait --output-format json) || true
+            echo "$result"
+            id=$(node -p 'JSON.parse(process.argv[1]).id' "$result")
+            status=$(node -p 'JSON.parse(process.argv[1]).status' "$result")
+            if [ "$status" != "Accepted" ]; then
+              xcrun notarytool log "$id" --key "$P8" --key-id "$NOTARY_KEY_ID" --issuer "$NOTARY_ISSUER_ID"
+              echo "::error title=Notarization failed::$(basename "$dmg"): $status"
+              exit 1
+            fi
+            xcrun stapler staple "$dmg"
+          done
+          node scripts/refresh-dmg-update-info.mjs release/*.dmg
+
+      - name: The macOS app, ZIP and DMG are signed, notarized and stapled
+        if: steps.mac-signing.outputs.signed == 'true'
+        run: |
+          check_app() {
+            codesign --verify --deep --strict --verbose=2 "$1"
+            codesign --display --verbose=2 "$1" 2>&1 | grep -E '^(Authority=Developer ID Application|Timestamp=)'
+            codesign --display --verbose=2 "$1" 2>&1 | grep -q 'flags=.*runtime' || { echo "$1: no hardened runtime"; exit 1; }
+            xcrun stapler validate "$1"
+            spctl --assess --type execute --verbose=2 "$1"
+          }
+          check_app release/mac-arm64/OpenCatt.app
+          check_app release/mac/OpenCatt.app
+          for zip in release/*-mac-*.zip; do
+            dir=$(mktemp -d)
+            ditto -x -k "$zip" "$dir"
+            check_app "$dir/OpenCatt.app"
+            rm -rf "$dir"
+          done
+          for dmg in release/*.dmg; do
+            codesign --verify --strict --verbose=2 "$dmg"
+            xcrun stapler validate "$dmg"
+            spctl --assess --type open --context context:primary-signature --verbose=2 "$dmg"
+          done
+
+      - name: Remove the signing files
+        if: always() && runner.os == 'macOS'
+        run: |
+          security delete-keychain "$RUNNER_TEMP/mac-signing/signing.keychain-db" 2>/dev/null || true
+          rm -rf "$RUNNER_TEMP/mac-signing"
       - name: The packaged ffmpeg encodes H.264
         shell: bash
         run: |

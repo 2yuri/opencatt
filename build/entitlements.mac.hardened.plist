@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Entitlements for the Developer ID build, which runs under the hardened runtime
+  (release.yml passes this file to electron-builder only when it signs; docs/RELEASING.md).
+  V8 compiles JavaScript at run time, so the app and its helpers need allow-jit; that includes
+  OpenCatt's own executable run as Node for the MCP bridge (ELECTRON_RUN_AS_NODE). Nothing else:
+  no native modules or third-party dylibs are loaded (ffmpeg links only system libraries), and the
+  app uses no camera, microphone or Apple Events. The name keeps electron-builder from picking it up
+  for the ad-hoc build, which stays as it was.
+-->
+<plist version="1.0">
+  <dict>
+    <key>com.apple.security.cs.allow-jit</key>
+    <true/>
+  </dict>
+</plist>

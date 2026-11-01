@@ -219,11 +219,13 @@ then adds one snapshot commit and mirrors the ffmpeg release there if it's missi
 pushes with `--push`. Every public commit is authored as the repo owner, yuri
 <hello@yuri.dev>, whoever runs it.
 
-Signing: macOS builds are ad-hoc signed (`identity: '-'`), which Apple Silicon needs to run them
-at all, and Windows builds are unsigned. With an Apple Developer ID, set it as `identity`, turn
-`hardenedRuntime` on and add notarization. With a Windows certificate, add it to `win`. Both go
-in as GitHub Actions secrets. Keep the `runAsNode` fuse on: the MCP bridge and the Windows
-`claude` launcher run OpenCatt's executable as Node.
+Signing: local macOS builds are ad-hoc signed (`identity: '-'`), which Apple Silicon needs to run
+them at all, and Windows builds are unsigned. The release workflow signs the macOS build with the
+Developer ID, notarizes and staples it when the signing secrets are set, and falls back to ad-hoc
+with a warning when they aren't: [docs/RELEASING.md](docs/RELEASING.md) has the secrets and the
+release steps. With a Windows certificate, add it to `win` as GitHub Actions secrets too. Keep the
+`runAsNode` fuse on: the MCP bridge and the Windows `claude` launcher run OpenCatt's executable as
+Node.
 
 Checking the Linux and Windows builds from any OS, with Docker:
 

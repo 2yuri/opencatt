@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
@@ -181,5 +181,13 @@ describe('electron-builder.yml', () => {
   it('ad-hoc signs macOS and leaves publishing to package.json', () => {
     expect(config).toMatch(/^ {2}identity: '-'$/m)
     expect(config).not.toMatch(/^publish: null/m)
+  })
+
+  it('gives the Developer ID build only allow-jit, and the ad-hoc build no entitlements file', () => {
+    const plist = readFileSync('build/entitlements.mac.hardened.plist', 'utf8')
+    const keys = [...plist.matchAll(/<key>([^<]+)<\/key>/g)].map((m) => m[1])
+    expect(keys).toEqual(['com.apple.security.cs.allow-jit'])
+    expect(config).not.toMatch(/^\s+entitlements(Inherit)?:/m)
+    expect(existsSync('build/entitlements.mac.plist')).toBe(false)
   })
 })
