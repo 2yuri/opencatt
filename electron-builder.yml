@@ -1,6 +1,8 @@
 # Installers for Windows, macOS and Linux. Run `pnpm dist` (current OS) or `pnpm dist:<os>`.
-# No certificates yet (OP-14): macOS builds are ad-hoc signed and Windows builds unsigned, so
-# Gatekeeper and SmartScreen warn on first launch; README "Installing" has the steps.
+# This file builds unsigned: macOS builds are ad-hoc signed and Windows builds unsigned, so
+# Gatekeeper and SmartScreen warn on first launch; README "Install" has the steps. release.yml
+# signs the macOS release with the Developer ID and notarizes it when its secrets are set
+# (docs/RELEASING.md).
 appId: io.github.opencat.app
 productName: OpenCatt
 copyright: Copyright © 2026 OpenCatt contributors
@@ -35,8 +37,9 @@ mac:
     - target: zip
       arch: [arm64, x64]
   # Ad-hoc signed: Apple Silicon refuses to run an app whose signature packaging broke ("is
-  # damaged"). Swap '-' for a Developer ID and turn hardenedRuntime on (and notarize) once we
-  # have a certificate.
+  # damaged"). The release build overrides identity and hardenedRuntime and adds
+  # build/entitlements.mac.hardened.plist on the command line (release.yml), so builds without the
+  # certificate keep working.
   identity: '-'
   hardenedRuntime: false
   icon: build/icon.icns
